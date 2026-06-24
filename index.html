@@ -54,8 +54,8 @@
                     id="inseeInput"
                     placeholder="Ex: 33063 (Bordeaux), 75056 (Paris)..."
                     class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400"
-                    pattern="[A-Za-z0-9]+"
-                    maxlength="5"
+                    pattern="[A-Za-z0-9\-]+"
+                    maxlength="15"
                     required
                 />
                 <button
@@ -98,44 +98,15 @@
             "Z": "Non applicable / Sans objet"
         };
 
-        // Données de secours en cas d'échec réseau (CORS ou Auth)
-        const getMockData = (code) => {
-            return `GEO;GEO_OBJECT;TRANS;AGE;EMPSTA_ENQ;WORK_AREA;RP_MEASURE;FREQ;OBS_STATUS;TIME_PERIOD;OBS_VALUE\n"${code}";"COM";"2";"Y_GE15";"1";"1";"POP";"A";"";2022;45201,50\n"${code}";"COM";"2";"Y_GE15";"1";"2";"POP";"A";"";2022;18302,20\n"${code}";"COM";"2";"Y_GE15";"1";"3";"POP";"A";"";2022;2150,80\n"${code}";"COM";"2";"Y_GE15";"1";"4";"POP";"A";"";2022;850,00\n"${code}";"COM";"2";"Y_GE15";"1";"5";"POP";"A";"";2022;120,00\n"${code}";"COM";"2";"Y_GE15";"1";"_T";"POP";"A";"";2022;66624,50`;
-        };
-
-        const parseCSV = (csvText) => {
-            const lines = csvText.trim().split('\n');
-            if (lines.length < 2) throw new Error("Le fichier CSV est vide ou invalide.");
-
-            const delimiter = lines[0].includes(';') ? ';' : ',';
-            const headers = lines[0].split(delimiter).map(h => h.replace(/"/g, '').trim());
-
-            const workAreaIdx = headers.indexOf('WORK_AREA');
-            const obsValueIdx = headers.indexOf('OBS_VALUE');
-
-            if (workAreaIdx === -1 || obsValueIdx === -1) {
-                throw new Error("Les colonnes WORK_AREA ou OBS_VALUE sont introuvables.");
-            }
-
-            const results = {};
-
-            for (let i = 1; i < lines.length; i++) {
-                if (!lines[i].trim()) continue;
-                
-                const cols = lines[i].split(delimiter).map(c => c.replace(/"/g, '').trim());
-                const workArea = cols[workAreaIdx];
-                const valStr = cols[obsValueIdx];
-
-                if (workArea && valStr) {
-                    const val = parseFloat(valStr.replace(',', '.'));
-                    if (!isNaN(val)) {
-                        results[workArea] = (results[workArea] || 0) + val;
-                    }
-                }
-            }
-
-            return results;
-        };
+        // Données de secours
+        const getMockResults = () => ({
+            "1": 45201.50,
+            "2": 18302.20,
+            "3": 2150.80,
+            "4": 850.00,
+            "5": 120.00,
+            "_T": 66624.50
+        });
 
         const processData = (parsedResults) => {
             const total = Object.entries(parsedResults).reduce((acc, [wa, val]) => {
@@ -264,33 +235,53 @@
             let isUsingMock = false;
 
             try {
-                // En SDMX, le jeu de données a 8 dimensions. Si GEO est la 1ère, 
-                // on ajoute 7 points (.) pour dire "Je veux toutes les valeurs pour les 7 autres dimensions"
-                const sdmxKey = `${inseeCode}.......`;
-                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC/${sdmxKey}`;
+                // Construction de l'URL comme dans votre exemple : utilisation de JSON et de paramètres URL
+                // On fixe les autres dimensions (AGE, TRANS...) d'après votre fichier CSV pour éviter les doublons.
+                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC?GEO=${inseeCode}&TRANS=2&AGE=Y_GE15&EMPSTA_ENQ=1&RP_MEASURE=POP&FREQ=A`;
                 
                 const response = await fetch(url, {
-                    headers: { 'Accept': 'text/csv' }
+                    headers: { 'Accept': 'application/json' }
                 });
 
                 if (!response.ok) {
-                    if (response.status === 404) throw new Error(`Erreur 404 : Aucune donnée trouvée pour ce code INSEE (ou structure de filtrage SDMX incorrecte).`);
-                    if (response.status === 429) throw new Error(`Erreur 429 : Vous avez dépassé la limite de 30 requêtes par minute.`);
-                    throw new Error(`Erreur HTTP: ${response.status}`);
+                    const text = await response.text();
+                    throw new Error(`Erreur HTTP ${response.status} : ${text}`);
                 }
 
-                const csvText = await response.text();
-                const parsedResults = parseCSV(csvText);
+                const data = await response.json();
+                const observations = data.observations || [];
+                
+                if (observations.length === 0) {
+                    throw new Error("Aucune donnée trouvée pour ce code INSEE avec ces paramètres.");
+                }
+
+                const parsedResults = {};
+
+                observations.forEach(obs => {
+                    const dimensions = obs.dimensions || {};
+                    const workArea = dimensions.WORK_AREA;
+                    
+                    let val = 0;
+                    if (obs.measures) {
+                        // On prend la première mesure disponible dynamiquement (OBS_VALUE, OBS_VALUE_NIVEAU...)
+                        const measureKey = Object.keys(obs.measures)[0];
+                        if (measureKey && obs.measures[measureKey].value !== undefined) {
+                            val = Number(obs.measures[measureKey].value);
+                        }
+                    }
+
+                    if (workArea && !isNaN(val)) {
+                        parsedResults[workArea] = (parsedResults[workArea] || 0) + val;
+                    }
+                });
+
                 dataToRender = processData(parsedResults);
 
             } catch (err) {
                 console.warn("Échec de l'appel API, utilisation des données de démonstration.", err);
-                showError(`${err.message} Affichage de données simulées pour démonstration.`);
+                showError(`${err.message} - Affichage de données simulées.`);
                 isUsingMock = true;
-                
-                const mockCsv = getMockData(inseeCode);
-                const parsedResults = parseCSV(mockCsv);
-                dataToRender = processData(parsedResults);
+                dataToRender = processData(getMockResults());
             } finally {
                 setLoadingState(false);
                 renderResults(dataToRender, isUsingMock, inseeCode);
