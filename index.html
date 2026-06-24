@@ -36,7 +36,7 @@
                 Lieu de travail des résidents
             </h1>
             <p class="text-slate-500">
-                Saisissez un Code INSEE pour analyser les flux de navettes domicile-travail.
+                Saisissez un code commune, département ou EPCI pour analyser les navettes domicile-travail.
             </p>
         </header>
 
@@ -52,7 +52,7 @@
                 <input
                     type="text"
                     id="inseeInput"
-                    placeholder="Ex: 33063 (Bordeaux), 75056 (Paris)..."
+                    placeholder="Ex: 33063 (Bordeaux), 33 (Gironde), 243300316 (EPCI)..."
                     class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400"
                     pattern="[A-Za-z0-9\-]+"
                     maxlength="15"
@@ -108,10 +108,14 @@
             "_T": 66624.50
         });
 
-        const processData = (parsedResults) => {
-            const total = Object.entries(parsedResults).reduce((acc, [wa, val]) => {
+        const processData = (parsedResults, year = null) => {
+            // Si l'API renvoie la modalité _T, on l'utilise comme total.
+            // Sinon, on reconstitue le total à partir des modalités détaillées.
+            const detailedTotal = Object.entries(parsedResults).reduce((acc, [wa, val]) => {
                 return wa !== '_T' ? acc + val : acc;
             }, 0);
+
+            const total = parsedResults._T !== undefined ? parsedResults._T : detailedTotal;
 
             const formattedData = Object.entries(parsedResults)
                 .filter(([wa, _]) => wa !== '_T')
@@ -123,7 +127,7 @@
                 }))
                 .sort((a, b) => b.value - a.value);
 
-            return { total, details: formattedData };
+            return { total, details: formattedData, year };
         };
 
         // UI Manipulation Elements
@@ -159,7 +163,9 @@
             let detailsHTML = '';
             
             if (data.details.length === 0) {
-                detailsHTML = `<p class="text-slate-500 text-center py-4">Aucune donnée trouvée pour ce code INSEE.</p>`;
+                detailsHTML = data.total > 0
+                    ? `<p class="text-slate-500 text-center py-4">L'API a renvoyé uniquement le total (_T), sans détail par lieu de travail.</p>`
+                    : `<p class="text-slate-500 text-center py-4">Aucune donnée trouvée pour ce code INSEE.</p>`;
             } else {
                 data.details.forEach(item => {
                     detailsHTML += `
@@ -203,7 +209,7 @@
                     </div>
                     <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500 flex items-center gap-2 justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                        Source : INSEE - Données du Recensement de la Population
+                        Source : INSEE - Données du Recensement de la Population${data.year ? ` · Millésime ${data.year}` : ''}
                     </div>
                 </div>
             `;
@@ -235,17 +241,33 @@
             let isUsingMock = false;
 
             try {
-                // Détermination du type de territoire (GEO_OBJECT) selon la longueur du code
-                let geoObject = 'COM'; // Par défaut : Commune (5 caractères)
-                if (inseeCode.length === 9) {
-                    geoObject = 'EPCI'; // Intercommunalité (9 caractères)
-                } else if (inseeCode.length <= 3) {
-                    geoObject = 'DEP';  // Département (2 ou 3 caractères)
-                }
+                // Melodi ne filtre pas la géographie avec GEO=code&GEO_OBJECT=type.
+                // La forme attendue par l'API est GEO=TYPE-code, par exemple :
+                // COM-33063, DEP-33, EPCI-243300316.
+                const getGeoFilter = (code) => {
+                    if (/^\d{9}$/.test(code)) {
+                        return `EPCI-${code}`;
+                    }
 
-                // Construction de l'URL avec l'ajout du paramètre GEO_OBJECT
-                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC?GEO=${inseeCode}&GEO_OBJECT=${geoObject}&TRANS=2&AGE=Y_GE15&EMPSTA_ENQ=1&RP_MEASURE=POP&FREQ=A`;
-                
+                    // Départements : 01 à 95, 2A/2B, DOM 971 à 976.
+                    if (/^(\d{2}|2A|2B|97[1-6])$/.test(code)) {
+                        return `DEP-${code}`;
+                    }
+
+                    // Communes : 5 caractères, dont les cas corses 2Axxx / 2Bxxx.
+                    if (/^(\d{5}|2A\d{3}|2B\d{3})$/.test(code)) {
+                        return `COM-${code}`;
+                    }
+
+                    throw new Error("Code géographique non reconnu. Utilise un code commune à 5 caractères, un département, ou un EPCI à 9 chiffres.");
+                };
+
+                const geoFilter = getGeoFilter(inseeCode);
+
+                // Important : on ne passe plus GEO_OBJECT dans l'URL.
+                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC?GEO=${encodeURIComponent(geoFilter)}&TRANS=2&AGE=Y_GE15&EMPSTA_ENQ=1&RP_MEASURE=POP&FREQ=A&maxResult=10000`;
+                console.log("URL API INSEE :", url);
+
                 const response = await fetch(url, {
                     headers: { 'Accept': 'application/json' }
                 });
@@ -257,17 +279,27 @@
 
                 const data = await response.json();
                 const observations = data.observations || [];
-                
+
                 if (observations.length === 0) {
                     throw new Error("Aucune donnée trouvée pour ce code INSEE avec ces paramètres.");
                 }
 
+                // Si plusieurs années sont renvoyées, on garde le millésime le plus récent
+                // pour éviter d'additionner plusieurs recensements entre eux.
+                const years = observations
+                    .map(obs => Number(obs.dimensions?.TIME_PERIOD))
+                    .filter(year => !Number.isNaN(year));
+                const latestYear = years.length > 0 ? Math.max(...years) : null;
+                const latestObservations = latestYear
+                    ? observations.filter(obs => Number(obs.dimensions?.TIME_PERIOD) === latestYear)
+                    : observations;
+
                 const parsedResults = {};
 
-                observations.forEach(obs => {
+                latestObservations.forEach(obs => {
                     const dimensions = obs.dimensions || {};
                     const workArea = dimensions.WORK_AREA;
-                    
+
                     let val = 0;
                     if (obs.measures) {
                         // On prend la première mesure disponible dynamiquement (OBS_VALUE, OBS_VALUE_NIVEAU...)
@@ -282,7 +314,7 @@
                     }
                 });
 
-                dataToRender = processData(parsedResults);
+                dataToRender = processData(parsedResults, latestYear);
 
             } catch (err) {
                 console.warn("Échec de l'appel API, utilisation des données de démonstration.", err);
