@@ -224,7 +224,7 @@
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const inseeCode = input.value.trim();
+            const inseeCode = input.value.trim().toUpperCase();
             if (!inseeCode) return;
 
             setLoadingState(true);
@@ -235,9 +235,16 @@
             let isUsingMock = false;
 
             try {
-                // Construction de l'URL comme dans votre exemple : utilisation de JSON et de paramètres URL
-                // On fixe les autres dimensions (AGE, TRANS...) d'après votre fichier CSV pour éviter les doublons.
-                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC?GEO=${inseeCode}&TRANS=2&AGE=Y_GE15&EMPSTA_ENQ=1&RP_MEASURE=POP&FREQ=A`;
+                // Détermination du type de territoire (GEO_OBJECT) selon la longueur du code
+                let geoObject = 'COM'; // Par défaut : Commune (5 caractères)
+                if (inseeCode.length === 9) {
+                    geoObject = 'EPCI'; // Intercommunalité (9 caractères)
+                } else if (inseeCode.length <= 3) {
+                    geoObject = 'DEP';  // Département (2 ou 3 caractères)
+                }
+
+                // Construction de l'URL avec l'ajout du paramètre GEO_OBJECT
+                const url = `https://api.insee.fr/melodi/data/DS_RP_NAVETTES_PRINC?GEO=${inseeCode}&GEO_OBJECT=${geoObject}&TRANS=2&AGE=Y_GE15&EMPSTA_ENQ=1&RP_MEASURE=POP&FREQ=A`;
                 
                 const response = await fetch(url, {
                     headers: { 'Accept': 'application/json' }
