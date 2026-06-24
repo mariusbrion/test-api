@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Navettes Domicile-Travail - INSEE</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Import de sql.js (WebAssembly) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <style>
         .fade-in { animation: fadeIn 0.5s ease-out forwards; }
@@ -16,6 +17,7 @@
 
     <div class="max-w-3xl mx-auto space-y-6">
         
+        <!-- Header -->
         <header class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 text-center">
             <div class="mx-auto bg-blue-100 w-16 h-16 flex items-center justify-center rounded-full mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 w-8 h-8"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -23,16 +25,25 @@
             <h1 class="text-2xl md:text-3xl font-bold text-slate-900 mb-2">
                 Lieu de travail des résidents
             </h1>
-            <p class="text-slate-500">
-                Saisissez un Code INSEE pour analyser les flux.
+            <p class="text-slate-500 mb-6">
+                Chargez votre base de données locale pour analyser les flux.
             </p>
             
-            <div id="dbStatus" class="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">
+            <!-- Zone de Glisser-Déposer -->
+            <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-slate-400 w-10 h-10 mb-3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                <p class="text-slate-600">Glissez-déposez le fichier <b>data.sqlite</b> ici<br>ou cliquez pour le sélectionner.</p>
+                <input type="file" id="fileInput" accept=".sqlite,.db" class="hidden" />
+            </div>
+
+            <!-- Status de chargement de la base de données -->
+            <div id="dbStatus" class="hidden inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">
                 <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                Chargement de la base de données SQLite...
+                Chargement de la base en cours...
             </div>
         </header>
 
+        <!-- Search Form -->
         <form id="searchForm" class="relative">
             <div class="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
                 <div class="pl-4">
@@ -53,10 +64,12 @@
             </div>
         </div>
 
+        <!-- Results Container -->
         <div id="resultsContainer"></div>
 
     </div>
 
+    <!-- Core Logic Application -->
     <script>
         const WORK_AREA_LABELS = {
             "1": "Commune de résidence",
@@ -68,44 +81,75 @@
             "Z": "Non applicable / Sans objet"
         };
 
-        let db = null; // Stockera l'instance SQLite
+        let db = null;
 
         // UI Elements
         const form = document.getElementById('searchForm');
         const input = document.getElementById('inseeInput');
         const submitBtn = document.getElementById('submitBtn');
-        const btnText = document.getElementById('btnText');
         const errorContainer = document.getElementById('errorContainer');
         const errorMessage = document.getElementById('errorMessage');
         const resultsContainer = document.getElementById('resultsContainer');
         const dbStatus = document.getElementById('dbStatus');
+        
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
 
-        // Initialisation de WebAssembly SQLite
-        async function initDatabase() {
+        // Configuration Drag & Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+        
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            if (e.dataTransfer.files.length) {
+                loadDatabaseFromFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                loadDatabaseFromFile(e.target.files[0]);
+            }
+        });
+
+        // Chargement local de la base de données SQLite
+        async function loadDatabaseFromFile(file) {
+            dbStatus.classList.remove('hidden');
+            dropZone.style.display = 'none'; // On cache la zone de drop
+            
             try {
-                // Configuration pour aller chercher le fichier .wasm
+                // Chargement du moteur WebAssembly (sql.js)
                 const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
                 const SQL = await initSqlJs(config);
                 
-                // Téléchargement de ton fichier généré par le script Python
-                const response = await fetch("data.sqlite");
-                if (!response.ok) throw new Error("Fichier data.sqlite introuvable.");
+                // Lecture du fichier depuis le disque dur de l'utilisateur
+                const arrayBuffer = await file.arrayBuffer();
+                db = new SQL.Database(new Uint8Array(arrayBuffer));
                 
-                const buffer = await response.arrayBuffer();
-                db = new SQL.Database(new Uint8Array(buffer));
-                
-                // Mise à jour de l'UI
+                // Base de données chargée avec succès !
                 dbStatus.className = "mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800";
-                dbStatus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Base de données prête`;
+                dbStatus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Base chargée : ${file.name}`;
                 
-                // On débloque l'input
+                // On active la barre de recherche
                 input.disabled = false;
+                input.focus();
                 
             } catch (err) {
                 console.error(err);
                 dbStatus.className = "mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800";
-                dbStatus.innerHTML = "Échec du chargement de la base de données.";
-                showError("Impossible de charger le fichier SQLite. Assurez-vous qu'il est bien à la racine de GitHub Pages.");
+                dbStatus.innerHTML = "Échec du chargement du fichier.";
+                showError("Le fichier fourni n'a pas pu être lu comme une base de données SQLite valide.");
+                dropZone.style.display = 'block'; // On réaffiche pour réessayer
             }
         }
 
@@ -166,7 +210,7 @@
                     </div>
                     <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500 flex items-center gap-2 justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                        Source : Fichier data.sqlite (Requête locale WebAssembly)
+                        Source : Fichier data.sqlite local (Requête locale WebAssembly)
                     </div>
                 </div>
             `;
@@ -186,7 +230,7 @@
 
         form.addEventListener('submit', (e) => {
             e.preventDefault();
-            if (!db) return; // Sécurité si la DB n'est pas chargée
+            if (!db) return;
             
             const inseeCode = input.value.trim().toUpperCase();
             if (!inseeCode) return;
@@ -195,7 +239,7 @@
             resultsContainer.innerHTML = '';
             
             try {
-                // Exécution de la requête SQL compilée avec le code INSEE de l'utilisateur
+                // Exécution de la requête SQL locale
                 const stmt = db.prepare("SELECT WORK_AREA, SUM(OBS_VALUE) as total_val FROM navettes WHERE GEO = :geo AND WORK_AREA != '_T' GROUP BY WORK_AREA");
                 stmt.bind({':geo': inseeCode});
                 
@@ -232,9 +276,6 @@
                 showError(err.message);
             }
         });
-
-        // Lancement de l'initialisation au chargement
-        initDatabase();
     </script>
 </body>
 </html>
