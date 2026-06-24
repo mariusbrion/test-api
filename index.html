@@ -162,7 +162,7 @@
             }
         };
 
-        const renderResults = (data, inseeCode) => {
+        const renderResults = (data, inseeCode, year) => {
             if (!data) {
                 resultsContainer.innerHTML = '';
                 return;
@@ -199,6 +199,7 @@
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-500"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
                                 Résultats pour le code ${inseeCode}
                             </h2>
+                            <span class="inline-block mt-2 text-xs font-medium bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Millésime ${year}</span>
                         </div>
                         <div class="text-right">
                             <p class="text-sm text-slate-500 font-medium uppercase tracking-wider">Population Active</p>
@@ -239,9 +240,22 @@
             resultsContainer.innerHTML = '';
             
             try {
-                // Exécution de la requête SQL locale
-                const stmt = db.prepare("SELECT WORK_AREA, SUM(OBS_VALUE) as total_val FROM navettes WHERE GEO = :geo AND WORK_AREA != '_T' GROUP BY WORK_AREA");
-                stmt.bind({':geo': inseeCode});
+                // 1. Trouver le millésime (année) le plus récent pour ce code
+                const yearStmt = db.prepare("SELECT MAX(TIME_PERIOD) as latest_year FROM navettes WHERE GEO = :geo");
+                yearStmt.bind({':geo': inseeCode});
+                let latestYear = null;
+                if (yearStmt.step()) {
+                    latestYear = yearStmt.getAsObject().latest_year;
+                }
+                yearStmt.free();
+
+                if (!latestYear) {
+                    throw new Error(`Aucune donnée trouvée pour le code ${inseeCode}.`);
+                }
+
+                // 2. Exécution de la requête SQL locale en filtrant sur l'année la plus récente
+                const stmt = db.prepare("SELECT WORK_AREA, SUM(OBS_VALUE) as total_val FROM navettes WHERE GEO = :geo AND TIME_PERIOD = :year AND WORK_AREA != '_T' GROUP BY WORK_AREA");
+                stmt.bind({':geo': inseeCode, ':year': latestYear});
                 
                 let total = 0;
                 const results = [];
@@ -260,7 +274,7 @@
                 stmt.free();
 
                 if (results.length === 0) {
-                    throw new Error(`Aucune donnée trouvée pour le code ${inseeCode}.`);
+                    throw new Error(`Aucune donnée trouvée pour le code ${inseeCode} en ${latestYear}.`);
                 }
 
                 // Calcul des pourcentages et tri
@@ -269,7 +283,7 @@
                     percentage: total > 0 ? (item.value / total) * 100 : 0
                 })).sort((a, b) => b.value - a.value);
 
-                renderResults({ total, details: formattedData }, inseeCode);
+                renderResults({ total, details: formattedData }, inseeCode, latestYear);
 
             } catch (err) {
                 console.error(err);
