@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mobilités professionnelles INSEE - Fichier détail MOBPRO</title>
+    <title>Mobilités professionnelles INSEE - MOBPRO interactif</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -24,6 +24,10 @@
         .map-legend-gradient { height: 10px; width: 160px; border-radius: 9999px; background: var(--legend-gradient, linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a)); margin: 6px 0; }
         .map-mode-btn { transition: all .18s ease; }
         .map-mode-btn.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 8px 20px rgba(37,99,235,.18); }
+        .scale-mode-btn { transition: all .18s ease; }
+        .scale-mode-btn.active { background: #0f172a; color: white; border-color: #0f172a; box-shadow: 0 8px 20px rgba(15,23,42,.16); }
+        .mode-hist-bar { transition: height .55s ease, opacity .18s ease; }
+        .map-below-btn.active { background: #047857; color: white; border-color: #047857; box-shadow: 0 8px 20px rgba(4,120,87,.18); }
     </style>
 </head>
 <body class="bg-slate-50 font-sans text-slate-800 min-h-screen p-4 md:p-8">
@@ -149,6 +153,7 @@ let currentMapGeoJSON = null;
 let currentMapResolved = null;
 let currentMapMode = 'work';
 let currentMapTransport = '5';
+let currentMapBelowAverageOnly = false;
 let geoJsonCache = new Map();
 
 const dropZone = document.getElementById('dropZone');
@@ -510,13 +515,42 @@ function buildTransportLegend(rowsList = []) {
     `;
 }
 
-function buildModalBarsHTML(title, rows, options = {}) {
-    const { total, ranked } = getModalSummary(rows);
+
+function getModeRow(rows, code) {
+    return (rows || []).find(item => String(item.code) === String(code)) || {
+        code: String(code),
+        label: TRANS_LABELS[String(code)] || `Mode ${code}`,
+        value: 0,
+        percentage: 0
+    };
+}
+
+function getModePercent(rows, code) {
+    const total = (rows || []).reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+    const value = (getModeRow(rows, code).value || 0);
+    return total > 0 ? (value / total) * 100 : 0;
+}
+
+function shortModeLabel(code) {
+    const labels = {
+        '1': 'Sans transport',
+        '2': 'Marche',
+        '3': 'Vélo',
+        '4': '2RM',
+        '5': 'Voiture',
+        '6': 'TC'
+    };
+    return labels[String(code)] || String(code);
+}
+
+function buildSingleDistributionBarsHTML(title, rows, options = {}) {
+    const { total } = getModalSummary(rows);
     const compact = options.compact || false;
     if (!rows.length || total <= 0) {
         return `<div class="text-sm text-slate-500">Aucune donnée modale disponible.</div>`;
     }
-    const maxPct = Math.max(...ranked.map(item => item.percentage), 1);
+    const height = compact ? 118 : 160;
+    const activeCodes = TRANS_ORDER.filter(code => getModeRow(rows, code).value > 0);
     return `
         <div class="space-y-${compact ? '3' : '4'}">
             <div class="flex items-start justify-between gap-4">
@@ -526,32 +560,204 @@ function buildModalBarsHTML(title, rows, options = {}) {
                 </div>
                 <span class="shrink-0 rounded-full bg-white border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600">100 %</span>
             </div>
-            ${buildStackedTransportBar(rows, { heightClass: compact ? 'h-5' : 'h-7', showLabels: !compact })}
-            <div class="space-y-2">
-                ${ranked.map(item => {
-                    const color = TRANS_COLORS[item.code] || TRANS_COLORS.OTHER;
-                    const barWidth = maxPct > 0 ? (item.percentage / maxPct) * 100 : 0;
-                    return `
-                        <div class="grid grid-cols-[minmax(0,1fr)_64px] gap-3 items-center text-xs">
-                            <div class="min-w-0">
-                                <div class="flex items-center justify-between gap-2 mb-1">
-                                    <span class="flex items-center gap-2 min-w-0">
-                                        <span class="inline-block w-2.5 h-2.5 rounded-full" style="background:${color}"></span>
-                                        <span class="truncate">${escapeHTML(item.label)}</span>
-                                    </span>
-                                    <span class="text-slate-400 tabular-nums hidden sm:inline">${formatNumber(item.value)}</span>
-                                </div>
-                                <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full" style="width:${barWidth}%; background:${color}"></div>
-                                </div>
+            <div class="rounded-2xl border border-slate-100 bg-white p-3">
+                <div class="grid gap-2" style="grid-template-columns: repeat(${activeCodes.length || 1}, minmax(42px, 1fr)); height:${height}px; align-items:end;">
+                    ${activeCodes.map(code => {
+                        const item = getModeRow(rows, code);
+                        const percentage = getModePercent(rows, code);
+                        const color = TRANS_COLORS[code] || TRANS_COLORS.OTHER;
+                        const h = Math.max(2, percentage);
+                        return `
+                            <div class="h-full flex flex-col justify-end items-center gap-1 min-w-0" title="${escapeHTML(item.label)} : ${formatPct(percentage)} (${formatNumber(item.value)})">
+                                <span class="text-[11px] font-bold text-slate-800 tabular-nums">${formatPct(percentage, percentage < 10 ? 1 : 0)}</span>
+                                <div class="w-full max-w-[46px] rounded-t-xl mode-hist-bar" style="height:${h}%; background:${color}; opacity:.9"></div>
                             </div>
-                            <div class="text-right font-bold tabular-nums text-slate-800">${formatPct(item.percentage)}</div>
-                        </div>
-                    `;
-                }).join('')}
+                        `;
+                    }).join('')}
+                </div>
+                <div class="grid gap-2 mt-2" style="grid-template-columns: repeat(${activeCodes.length || 1}, minmax(42px, 1fr));">
+                    ${activeCodes.map(code => `<div class="text-center text-[11px] text-slate-500 truncate" title="${escapeHTML(TRANS_LABELS[code] || code)}">${escapeHTML(shortModeLabel(code))}</div>`).join('')}
+                </div>
             </div>
         </div>
     `;
+}
+
+function buildModalBarsHTML(title, rows, options = {}) {
+    return buildSingleDistributionBarsHTML(title, rows, options);
+}
+
+function buildGroupedWorkModalHTML(cards) {
+    const validCards = cards.filter(card => (card.rows || []).length && getModalSummary(card.rows).total > 0);
+    if (!validCards.length) return '';
+    const codes = TRANS_ORDER.filter(code => validCards.some(card => getModeRow(card.rows, code).value > 0));
+    const chartHeight = 190;
+    return `
+        <div class="bg-slate-50 rounded-2xl border border-slate-100 p-4 md:p-5 space-y-5">
+            <div>
+                <h3 class="font-bold text-slate-900">Lecture croisée par lieu de travail</h3>
+                <p class="text-sm text-slate-500 mt-1">Barres côte à côte : chaque mode garde le même ordre pour comparer directement les actifs travaillant dans leur commune et hors de celle-ci.</p>
+            </div>
+            <div class="flex flex-wrap gap-3 text-xs text-slate-600">
+                ${validCards.map((card, idx) => `
+                    <span class="inline-flex items-center gap-1.5">
+                        <span class="inline-block w-3 h-3 rounded" style="background:#0f172a; opacity:${idx === 0 ? '.9' : '.45'}"></span>
+                        ${escapeHTML(card.shortLabel || card.title)}
+                    </span>
+                `).join('')}
+            </div>
+            <div class="rounded-2xl bg-white border border-slate-100 p-4 overflow-x-auto">
+                <div class="grid gap-5 min-w-[640px]" style="grid-template-columns: repeat(${codes.length || 1}, minmax(82px, 1fr)); height:${chartHeight}px; align-items:end;">
+                    ${codes.map(code => `
+                        <div class="h-full flex items-end justify-center gap-1.5">
+                            ${validCards.map((card, idx) => {
+                                const pctValue = getModePercent(card.rows, code);
+                                const item = getModeRow(card.rows, code);
+                                const color = TRANS_COLORS[code] || TRANS_COLORS.OTHER;
+                                return `
+                                    <div class="flex-1 max-w-[30px] h-full flex flex-col justify-end items-center gap-1" title="${escapeHTML(card.shortLabel || card.title)} · ${escapeHTML(item.label)} : ${formatPct(pctValue)} (${formatNumber(item.value)})">
+                                        <span class="text-[10px] font-bold text-slate-700 tabular-nums">${pctValue >= 8 ? formatPct(pctValue, 0) : ''}</span>
+                                        <div class="w-full rounded-t-lg mode-hist-bar" style="height:${Math.max(1.5, pctValue)}%; background:${color}; opacity:${idx === 0 ? '.92' : '.48'}"></div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="grid gap-5 min-w-[640px] mt-3" style="grid-template-columns: repeat(${codes.length || 1}, minmax(82px, 1fr));">
+                    ${codes.map(code => `
+                        <div class="text-center">
+                            <div class="mx-auto mb-1 w-3 h-3 rounded-full" style="background:${TRANS_COLORS[code] || TRANS_COLORS.OTHER}"></div>
+                            <div class="text-xs font-semibold text-slate-700">${escapeHTML(shortModeLabel(code))}</div>
+                            <div class="text-[11px] text-slate-400">${escapeHTML(TRANS_LABELS[code] || code)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function buildScaleStackedView(validCards) {
+    return `
+        <div class="space-y-4">
+            ${validCards.map(card => {
+                const summary = getModalSummary(card.rows);
+                const mainMode = summary.ranked[0];
+                return `
+                    <div class="grid lg:grid-cols-[220px_1fr_118px] gap-2 lg:gap-4 lg:items-center">
+                        <div class="min-w-0">
+                            <p class="font-semibold text-slate-800 truncate">${escapeHTML(card.label)}</p>
+                            <p class="text-xs text-slate-500 truncate">${escapeHTML(card.subtitle || '')}</p>
+                        </div>
+                        ${buildStackedTransportBar(card.rows, { heightClass: 'h-8', showLabels: true })}
+                        <div class="text-xs lg:text-right text-slate-500">
+                            <span class="font-semibold text-slate-700">${mainMode ? formatPct(mainMode.percentage) : '—'}</span><br>
+                            <span>${mainMode ? escapeHTML(mainMode.label) : ''}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function buildScaleSankeyHTML(validCards) {
+    const modes = TRANS_ORDER.filter(code => validCards.some(card => getModeRow(card.rows, code).value > 0));
+    if (validCards.length < 2 || !modes.length) return `<div class="text-sm text-slate-500">Sankey indisponible : il faut au moins deux échelles comparables.</div>`;
+
+    const width = Math.max(820, 230 + validCards.length * 210);
+    const height = 380;
+    const top = 64;
+    const barHeight = 230;
+    const barW = 42;
+    const labelX = 18;
+    const x0 = 245;
+    const usable = width - x0 - 70;
+    const gap = validCards.length > 1 ? usable / (validCards.length - 1) : 0;
+    const xPositions = validCards.map((_, i) => x0 + i * gap);
+
+    const stacks = validCards.map(card => {
+        let cursor = top;
+        const segments = {};
+        for (const code of modes) {
+            const pctValue = getModePercent(card.rows, code);
+            const h = Math.max(0.8, barHeight * pctValue / 100);
+            segments[code] = { y0: cursor, y1: cursor + h, pct: pctValue, value: getModeRow(card.rows, code).value };
+            cursor += h;
+        }
+        return segments;
+    });
+
+    const ribbons = [];
+    for (let i = 0; i < validCards.length - 1; i++) {
+        for (const code of modes) {
+            const color = TRANS_COLORS[code] || TRANS_COLORS.OTHER;
+            const a = stacks[i][code];
+            const b = stacks[i + 1][code];
+            ribbons.push(`<polygon points="${xPositions[i] + barW},${a.y0} ${xPositions[i + 1]},${b.y0} ${xPositions[i + 1]},${b.y1} ${xPositions[i] + barW},${a.y1}" fill="${color}" opacity="0.14"></polygon>`);
+        }
+    }
+
+    const bars = validCards.map((card, cardIdx) => {
+        const x = xPositions[cardIdx];
+        const rects = modes.map(code => {
+            const seg = stacks[cardIdx][code];
+            const color = TRANS_COLORS[code] || TRANS_COLORS.OTHER;
+            const label = seg.pct >= 8 ? `${Math.round(seg.pct)}%` : '';
+            return `
+                <g>
+                    <rect x="${x}" y="${seg.y0}" width="${barW}" height="${Math.max(1, seg.y1 - seg.y0)}" rx="5" fill="${color}" opacity="0.92"></rect>
+                    ${label ? `<text x="${x + barW / 2}" y="${(seg.y0 + seg.y1) / 2 + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="white">${label}</text>` : ''}
+                    <title>${escapeHTML(card.label)} · ${escapeHTML(TRANS_LABELS[code] || code)} : ${formatPct(seg.pct)} (${formatNumber(seg.value)})</title>
+                </g>
+            `;
+        }).join('');
+        return `
+            ${rects}
+            <text x="${x + barW / 2}" y="${top + barHeight + 28}" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">${escapeHTML(card.label)}</text>
+            <text x="${x + barW / 2}" y="${top + barHeight + 45}" text-anchor="middle" font-size="10" fill="#64748b">${escapeHTML(card.subtitle || '')}</text>
+        `;
+    }).join('');
+
+    const labels = modes.map((code, idx) => {
+        const y = top + 10 + idx * 30;
+        const color = TRANS_COLORS[code] || TRANS_COLORS.OTHER;
+        const values = validCards.map(card => formatPct(getModePercent(card.rows, code), 1)).join(' · ');
+        return `
+            <g>
+                <circle cx="${labelX + 6}" cy="${y - 3}" r="5" fill="${color}"></circle>
+                <text x="${labelX + 18}" y="${y}" font-size="11" font-weight="700" fill="#334155">${escapeHTML(shortModeLabel(code))}</text>
+                <text x="${labelX + 18}" y="${y + 14}" font-size="10" fill="#64748b">${escapeHTML(values)}</text>
+            </g>
+        `;
+    }).join('');
+
+    return `
+        <div class="rounded-2xl bg-white border border-slate-100 overflow-x-auto p-2">
+            <svg viewBox="0 0 ${width} ${height}" class="min-w-[820px] w-full h-auto" role="img" aria-label="Sankey expérimental des parts modales par échelle">
+                <rect x="0" y="0" width="${width}" height="${height}" rx="18" fill="#ffffff"></rect>
+                <text x="18" y="28" font-size="13" font-weight="800" fill="#0f172a">Sankey expérimental</text>
+                <text x="18" y="45" font-size="11" fill="#64748b">Les rubans relient les mêmes modes entre les échelles. Lecture exploratoire, pas un flux réel.</text>
+                ${labels}
+                ${ribbons.join('')}
+                ${bars}
+            </svg>
+        </div>
+    `;
+}
+
+function setScaleComparisonMode(mode) {
+    const stacked = document.getElementById('scaleViewStacked');
+    const sankey = document.getElementById('scaleViewSankey');
+    const bStacked = document.getElementById('scaleBtnStacked');
+    const bSankey = document.getElementById('scaleBtnSankey');
+    if (!stacked || !sankey) return;
+    const isSankey = mode === 'sankey';
+    stacked.classList.toggle('hidden', isSankey);
+    sankey.classList.toggle('hidden', !isSankey);
+    bStacked?.classList.toggle('active', !isSankey);
+    bSankey?.classList.toggle('active', isSankey);
 }
 
 function buildScaleComparisonHTML(cards) {
@@ -559,28 +765,21 @@ function buildScaleComparisonHTML(cards) {
     if (!validCards.length) return '';
     return `
         <div class="bg-slate-50 rounded-2xl border border-slate-100 p-4 md:p-5 space-y-5">
-            <div>
-                <h3 class="font-bold text-slate-900">Comparaison des parts modales par échelle</h3>
-                <p class="text-sm text-slate-500 mt-1">Même lecture 100 %, ce qui permet de comparer directement le territoire analysé avec le département et la région.</p>
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                <div>
+                    <h3 class="font-bold text-slate-900">Comparaison des parts modales par échelle</h3>
+                    <p class="text-sm text-slate-500 mt-1">Vue principale en barres 100 %. Le mode Sankey permet de tester une lecture verticale reliée par mode.</p>
+                </div>
+                <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 w-fit">
+                    <button type="button" id="scaleBtnStacked" onclick="setScaleComparisonMode('stacked')" class="scale-mode-btn active px-3 py-2 rounded-lg text-sm font-semibold border border-transparent">Barres 100 %</button>
+                    <button type="button" id="scaleBtnSankey" onclick="setScaleComparisonMode('sankey')" class="scale-mode-btn px-3 py-2 rounded-lg text-sm font-semibold border border-transparent text-slate-600">Sankey test</button>
+                </div>
             </div>
-            <div class="space-y-4">
-                ${validCards.map(card => {
-                    const summary = getModalSummary(card.rows);
-                    const mainMode = summary.ranked[0];
-                    return `
-                        <div class="grid lg:grid-cols-[220px_1fr_118px] gap-2 lg:gap-4 lg:items-center">
-                            <div class="min-w-0">
-                                <p class="font-semibold text-slate-800 truncate">${escapeHTML(card.label)}</p>
-                                <p class="text-xs text-slate-500 truncate">${escapeHTML(card.subtitle || '')}</p>
-                            </div>
-                            ${buildStackedTransportBar(card.rows, { heightClass: 'h-8', showLabels: true })}
-                            <div class="text-xs lg:text-right text-slate-500">
-                                <span class="font-semibold text-slate-700">${mainMode ? formatPct(mainMode.percentage) : '—'}</span><br>
-                                <span>${mainMode ? escapeHTML(mainMode.label) : ''}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
+            <div id="scaleViewStacked">
+                ${buildScaleStackedView(validCards)}
+            </div>
+            <div id="scaleViewSankey" class="hidden">
+                ${buildScaleSankeyHTML(validCards)}
             </div>
             ${buildTransportLegend(validCards.map(card => card.rows))}
         </div>
@@ -788,21 +987,20 @@ function renderTransportSummary(resolved) {
      .filter(item => item.rows.length);
 
     const workCards = [
-        { key: '10', title: `${WORK_LABELS['10']} — ${resolved.label}` },
-        { key: '20_30', title: `${WORK_LABELS['20_30']} — ${resolved.label}` }
-    ].filter(item => (currentModalData[item.key] || []).length);
+        { key: '10', title: `${WORK_LABELS['10']} — ${resolved.label}`, shortLabel: 'Dans la commune' },
+        { key: '20_30', title: `${WORK_LABELS['20_30']} — ${resolved.label}`, shortLabel: 'Hors commune' }
+    ].filter(item => (currentModalData[item.key] || []).length)
+     .map(item => ({ ...item, rows: currentModalData[item.key] || [] }));
 
     return `
         <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
             <div class="p-6 md:p-8 border-b border-slate-100">
                 <h2 class="text-xl font-bold text-slate-900">Parts modales</h2>
-                <p class="text-sm text-slate-500 mt-1">Les comparaisons d’échelles utilisent des barres 100 % empilées. Le Sankey n’a pas été retenu ici : il serait moins lisible pour comparer des distributions modales.</p>
+                <p class="text-sm text-slate-500 mt-1">Comparaison par échelle, puis lecture croisée par lieu de travail avec des barres non empilées pour faciliter la comparaison des modes.</p>
             </div>
             <div class="p-6 md:p-8 space-y-6">
                 ${buildScaleComparisonHTML(scaleCards)}
-                <div class="grid lg:grid-cols-2 gap-6">
-                    ${workCards.map(card => `<div class="bg-slate-50 rounded-2xl border border-slate-100 p-4 md:p-5">${buildModalBarsHTML(card.title, currentModalData[card.key] || [])}</div>`).join('')}
-                </div>
+                ${buildGroupedWorkModalHTML(workCards)}
             </div>
         </section>
     `;
@@ -884,6 +1082,19 @@ function getMapValue(item) {
     return item.ownShare;
 }
 
+function getMapNumerator(item) {
+    if (!item) return 0;
+    if (currentMapMode === 'transport') return item.transport?.[currentMapTransport] || 0;
+    return item.own || 0;
+}
+
+function getMapWeightedAverage() {
+    const items = Object.values(currentMapStats).filter(item => item && item.total > 0);
+    const total = items.reduce((sum, item) => sum + item.total, 0);
+    const numerator = items.reduce((sum, item) => sum + getMapNumerator(item), 0);
+    return total > 0 ? (numerator / total) * 100 : null;
+}
+
 function getMapScale() {
     const values = Object.values(currentMapStats)
         .map(item => getMapValue(item))
@@ -912,31 +1123,41 @@ function getMapLegendTitle() {
 
 function getMapLayerStyle(feature) {
     const code = feature.properties?.code;
-    const value = getMapValue(currentMapStats[code]);
+    const item = currentMapStats[code];
+    const value = getMapValue(item);
     const analyzedCommune = currentMapResolved?.communeCode || (currentMapResolved?.geoObject === 'COM' ? currentMapResolved.code : null);
     const isAnalyzed = analyzedCommune && code === analyzedCommune;
+    const weightedAvg = getMapWeightedAverage();
+    const isBelowAverage = value !== null && value !== undefined && Number.isFinite(value) && weightedAvg !== null && value < weightedAvg;
+    const dimmedByToggle = currentMapBelowAverageOnly && !isBelowAverage;
     return {
-        color: isAnalyzed ? '#0f172a' : '#ffffff',
-        weight: isAnalyzed ? 3 : 1,
-        fillColor: colorForMapValue(value),
-        fillOpacity: 0.82,
+        color: isAnalyzed ? '#0f172a' : (isBelowAverage && currentMapBelowAverageOnly ? '#047857' : '#ffffff'),
+        weight: isAnalyzed ? 3 : (isBelowAverage && currentMapBelowAverageOnly ? 2 : 1),
+        fillColor: dimmedByToggle ? '#e2e8f0' : colorForMapValue(value),
+        fillOpacity: dimmedByToggle ? 0.28 : 0.84,
         opacity: 1
     };
 }
 
 function getMapTooltipHTML(props, item) {
     const value = getMapValue(item);
+    const absolute = getMapNumerator(item);
+    const weightedAvg = getMapWeightedAverage();
+    const belowLine = weightedAvg === null || value === null || value === undefined
+        ? ''
+        : `<div class="mt-1 ${value < weightedAvg ? 'text-emerald-700' : 'text-slate-500'}"><b>${value < weightedAvg ? 'Sous' : 'Au-dessus de'} la moyenne pondérée</b> (${formatPct(weightedAvg)})</div>`;
     const modeLine = currentMapMode === 'transport'
-        ? `<div><b>${escapeHTML(TRANS_LABELS[currentMapTransport] || currentMapTransport)} :</b> ${value === null || value === undefined ? '—' : formatPct(value)}</div>`
-        : `<div><b>Travaille dans sa commune :</b> ${value === null || value === undefined ? '—' : formatPct(value)}</div>`;
+        ? `<div><b>${escapeHTML(TRANS_LABELS[currentMapTransport] || currentMapTransport)} :</b> ${value === null || value === undefined ? '—' : `${formatPct(value)} · ${formatNumber(absolute)} actifs`}</div>`
+        : `<div><b>Travaille dans sa commune :</b> ${value === null || value === undefined ? '—' : `${formatPct(value)} · ${formatNumber(absolute)} actifs`}</div>`;
     return `
         <div class="text-sm">
             <div class="font-bold text-slate-900">${escapeHTML(props.nom || props.code)}</div>
             <div class="text-slate-500 font-mono mb-2">${escapeHTML(props.code)}</div>
             <div><b>Actifs occupés :</b> ${item?.total ? formatNumber(item.total) : '—'}</div>
             ${modeLine}
-            <div><b>Travaille dans sa commune :</b> ${item?.ownShare === null || item?.ownShare === undefined ? '—' : formatPct(item.ownShare)}</div>
-            <div><b>Voiture, tous lieux :</b> ${item?.carShare === null || item?.carShare === undefined ? '—' : formatPct(item.carShare)}</div>
+            <div><b>Travaille dans sa commune :</b> ${item?.ownShare === null || item?.ownShare === undefined ? '—' : `${formatPct(item.ownShare)} · ${formatNumber(item.own || 0)} actifs`}</div>
+            <div><b>Voiture, tous lieux :</b> ${item?.carShare === null || item?.carShare === undefined ? '—' : `${formatPct(item.carShare)} · ${formatNumber(item.car || 0)} actifs`}</div>
+            ${belowLine}
         </div>
     `;
 }
@@ -944,10 +1165,9 @@ function getMapTooltipHTML(props, item) {
 function updateMapLegendAndStatus() {
     const statusEl = document.getElementById('mapStatus');
     const scale = getMapScale();
+    const weightedAvg = getMapWeightedAverage();
     if (statusEl && currentMapGeoJSON?.features) {
-        const values = Object.values(currentMapStats).map(item => getMapValue(item)).filter(v => Number.isFinite(v));
-        const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-        statusEl.textContent = `${currentMapGeoJSON.features.length} communes affichées · moyenne simple ${avg === null ? '—' : formatPct(avg)}`;
+        statusEl.textContent = `${currentMapGeoJSON.features.length} communes affichées · moyenne pondérée ${weightedAvg === null ? '—' : formatPct(weightedAvg)}`;
     }
     if (currentMapLegend) {
         const gradient = currentMapMode === 'transport'
@@ -958,7 +1178,9 @@ function updateMapLegendAndStatus() {
             <div class="font-semibold">${escapeHTML(getMapLegendTitle())}</div>
             <div class="map-legend-gradient"></div>
             <div class="flex justify-between gap-3"><span>${formatPct(scale.min)}</span><span>${formatPct(scale.max)}</span></div>
-            <div class="mt-2 text-[11px]">Bord noir : commune recherchée</div>
+            <div class="mt-2 text-[11px]">Moyenne pondérée : <b>${weightedAvg === null ? '—' : formatPct(weightedAvg)}</b></div>
+            <div class="mt-1 text-[11px]">Bord noir : commune recherchée</div>
+            ${currentMapBelowAverageOnly ? '<div class="mt-1 text-[11px] text-emerald-700 font-semibold">Filtre visuel : sous la moyenne</div>' : ''}
         `;
     }
 }
@@ -980,6 +1202,7 @@ function bindMapControls() {
     const workBtn = document.getElementById('mapModeWork');
     const transBtn = document.getElementById('mapModeTransport');
     const transSelect = document.getElementById('mapTransportSelect');
+    const belowBtn = document.getElementById('mapBelowAverageToggle');
     if (!workBtn || !transBtn || !transSelect) return;
 
     const updateControls = () => {
@@ -987,12 +1210,14 @@ function bindMapControls() {
         transBtn.classList.toggle('active', currentMapMode === 'transport');
         transSelect.disabled = currentMapMode !== 'transport';
         transSelect.classList.toggle('opacity-50', currentMapMode !== 'transport');
+        belowBtn?.classList.toggle('active', currentMapBelowAverageOnly);
         refreshMapMode();
     };
 
     workBtn.addEventListener('click', () => { currentMapMode = 'work'; updateControls(); });
     transBtn.addEventListener('click', () => { currentMapMode = 'transport'; updateControls(); });
     transSelect.addEventListener('change', () => { currentMapTransport = transSelect.value; currentMapMode = 'transport'; updateControls(); });
+    belowBtn?.addEventListener('click', () => { currentMapBelowAverageOnly = !currentMapBelowAverageOnly; updateControls(); });
     updateControls();
 }
 
@@ -1053,7 +1278,8 @@ function renderMapSection(resolved) {
                     <select id="mapTransportSelect" class="bg-white rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-400" disabled>
                         ${TRANS_ORDER.map(code => `<option value="${code}" ${code === '5' ? 'selected' : ''}>${escapeHTML(TRANS_LABELS[code] || code)}</option>`).join('')}
                     </select>
-                    <p class="text-xs text-slate-500">Survole une commune pour afficher ses valeurs. La commune recherchée reste la seule avec un contour noir.</p>
+                    <button type="button" id="mapBelowAverageToggle" class="map-below-btn px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 bg-white text-slate-700 transition">Sous la moyenne</button>
+                    <p class="text-xs text-slate-500">Survole une commune pour afficher le pourcentage et la valeur absolue. Le toggle isole visuellement les communes sous la moyenne pondérée de l’EPCI.</p>
                 </div>
             </div>
             <div id="epciMap"></div>
@@ -1078,6 +1304,7 @@ async function renderEpciMap(resolved, year) {
         currentMapResolved = resolved;
         currentMapMode = 'work';
         currentMapTransport = '5';
+        currentMapBelowAverageOnly = false;
 
         if (currentMap) {
             currentMap.remove();
@@ -1103,7 +1330,7 @@ async function renderEpciMap(resolved, year) {
                     mouseover: e => {
                         const analyzedCommune = currentMapResolved?.communeCode || (currentMapResolved?.geoObject === 'COM' ? currentMapResolved.code : null);
                         const isAnalyzed = analyzedCommune && props.code === analyzedCommune;
-                        e.target.setStyle({ weight: isAnalyzed ? 3 : 2, color: isAnalyzed ? '#0f172a' : '#64748b', fillOpacity: 0.94 });
+                        e.target.setStyle({ weight: isAnalyzed ? 3 : 1.6, color: isAnalyzed ? '#0f172a' : '#94a3b8', fillOpacity: 0.94 });
                         e.target.bringToFront();
                     },
                     mouseout: e => currentGeoJsonLayer.resetStyle(e.target)
