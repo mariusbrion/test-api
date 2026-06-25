@@ -3,71 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Navettes Domicile-Travail - INSEE</title>
+    <title>Mobilités professionnelles INSEE - Fichier détail MOBPRO</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <style>
-        .fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        .fade-in { animation: fadeIn 0.45s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .progress-bar { transition: width 1s ease-out; }
-        .modal-hover-zone { cursor: help; }
-        .modal-hover-zone:hover { filter: brightness(0.97); }
-        .donut-tooltip { max-width: min(360px, calc(100vw - 32px)); }
-        .donut-chart { width: 112px; height: 112px; border-radius: 9999px; display: grid; place-items: center; }
+        .bar-animate { transition: width 0.8s ease-out; }
+        .hoverable { cursor: help; }
+        .hoverable:hover { filter: brightness(0.96); }
+        .donut-tooltip { position: fixed; z-index: 50; display: none; max-width: min(380px, calc(100vw - 32px)); pointer-events: none; }
+        .donut-chart { width: 112px; height: 112px; border-radius: 9999px; display: grid; place-items: center; flex: 0 0 auto; }
         .donut-hole { width: 62px; height: 62px; border-radius: 9999px; background: white; display: flex; align-items: center; justify-content: center; text-align: center; }
     </style>
 </head>
 <body class="bg-slate-50 font-sans text-slate-800 min-h-screen p-4 md:p-8">
-
-    <div class="max-w-5xl mx-auto space-y-6">
+    <div class="max-w-6xl mx-auto space-y-6">
         <header class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 text-center">
             <div class="mx-auto bg-blue-100 w-16 h-16 flex items-center justify-center rounded-full mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 w-8 h-8"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
             </div>
-            <h1 class="text-2xl md:text-3xl font-bold text-slate-900 mb-2">
-                Lieu de travail des résidents
-            </h1>
-            <p class="text-slate-500 mb-6">
-                Analyse locale du jeu INSEE <b>DS_RP_NAVETTES_PRINC</b> à partir d'une base SQLite.
-            </p>
+            <h1 class="text-2xl md:text-3xl font-bold text-slate-900 mb-2">Mobilités professionnelles des résidents</h1>
+            <p class="text-slate-500 mb-6">Analyse du fichier détail INSEE <b>MOBPRO</b>, agrégé par <b>IPONDI</b> dans une base SQLite locale.</p>
 
             <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-slate-400 w-10 h-10 mb-3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-                <p class="text-slate-600">Glissez-déposez le fichier <b>data.sqlite</b> ici<br>ou cliquez pour le sélectionner.</p>
+                <p class="text-slate-600">Glissez-déposez le fichier <b>data_mobpro.sqlite</b> ici<br>ou cliquez pour le sélectionner.</p>
                 <input type="file" id="fileInput" accept=".sqlite,.db" class="hidden" />
             </div>
 
             <div id="dbStatus" class="hidden inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">
-                <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 Chargement de la base en cours...
             </div>
         </header>
 
         <form id="searchForm" class="space-y-3">
-            <div class="grid md:grid-cols-[1fr_220px_auto] gap-3">
+            <div class="grid md:grid-cols-[1fr_230px_auto] gap-3">
                 <div class="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
                     <div class="pl-4">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400 w-5 h-5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                     </div>
-                    <input type="text" id="inseeInput" placeholder="Ex : Bordeaux, Châtellerault, 33063, 243300316..." class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400 disabled:bg-slate-50" maxlength="80" required disabled />
+                    <input type="text" id="territoryInput" placeholder="Ex : Bordeaux, Châtellerault, 33063, 243300316..." class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400 disabled:bg-slate-50" maxlength="90" required disabled />
                 </div>
 
                 <select id="geoObjectSelect" class="bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400" disabled>
                     <option value="AUTO">Type auto</option>
                     <option value="COM">Commune</option>
                     <option value="EPCI">EPCI de la commune</option>
-                    <option value="DEP">Département</option>
-                    <option value="REG">Région</option>
+                    <option value="DEP">Département de la commune</option>
+                    <option value="REG">Région de la commune</option>
                 </select>
 
                 <button type="submit" id="submitBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-4 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                     <span id="btnText">Analyser</span>
                 </button>
             </div>
-
-            <p class="text-xs text-slate-500 px-1">
-                Tu peux saisir un code INSEE directement ou le nom d'une commune. Pour un nom de commune, le site récupère automatiquement le code commune, EPCI, département ou région demandé.
-            </p>
+            <p class="text-xs text-slate-500 px-1">Tu peux saisir un code directement ou le nom d'une commune. Pour un nom, l'API geo.api.gouv.fr récupère le code commune, EPCI, département ou région demandé.</p>
         </form>
 
         <div id="resolvedInfo" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900"></div>
@@ -80,1238 +71,630 @@
             </div>
         </div>
 
-        <div id="resultsContainer"></div>
+        <main id="resultsContainer"></main>
     </div>
 
-    <script>
-        const GEO_API_BASE = 'https://geo.api.gouv.fr';
-        const TEMPORAL_YEARS = ['2011', '2016', '2022'];
-        const STACK_CHILD_WORK_AREAS = ['21', '22', '23', '24T30'];
-        const TRANSPORT_ORDER = ['5', '6', '3', '2', '4', '1'];
+    <div id="donutTooltip" class="donut-tooltip bg-white rounded-2xl shadow-xl border border-slate-200 p-4"></div>
 
-        const TRANS_LABELS = {
-            '1': 'Pas de transport',
-            '2': 'Marche à pied',
-            '3': 'Vélo',
-            '4': 'Deux-roues motorisé',
-            '5': 'Voiture, camion ou fourgonnette',
-            '6': 'Transport en commun',
-            '_T': 'Total',
-            'Z': 'Non applicable / Sans objet'
-        };
+<script>
+const GEO_API_BASE = 'https://geo.api.gouv.fr';
+const PREFERRED_TEMPORAL_YEARS = [2011, 2016, 2022];
+const CHILD_WORK_AREAS = ['21', '22', '23', '24T30'];
+const WORK_ORDER = ['10', '21', '22', '23', '24T30'];
+const TRANS_ORDER = ['5', '6', '3', '2', '4', '1'];
 
-        const TRANS_COLORS = {
-            '1': '#94a3b8',
-            '2': '#22c55e',
-            '3': '#06b6d4',
-            '4': '#f97316',
-            '5': '#3b82f6',
-            '6': '#8b5cf6',
-            'OTHER': '#cbd5e1'
-        };
+const WORK_LABELS = {
+    '10': 'Dans la commune de résidence actuelle',
+    '21': 'Autre commune du département',
+    '22': 'Autre département de la région',
+    '23': 'Hors de la région en métropole',
+    '24T30': 'Autre région hors métropole, COM ou étranger',
+    '20_30': 'Dans une autre commune'
+};
 
-        const WORK_AREA_COLORS = {
-            '10': '#2563eb',
-            '1': '#2563eb',
-            '21': '#60a5fa',
-            '22': '#38bdf8',
-            '23': '#818cf8',
-            '24T30': '#a78bfa',
-            '20_30': '#1d4ed8',
-            'OTHER': '#94a3b8'
-        };
+const TRANS_LABELS = {
+    '1': 'Pas de transport',
+    '2': 'Marche à pied',
+    '3': 'Vélo, y compris VAE',
+    '4': 'Deux-roues motorisé',
+    '5': 'Voiture, camion ou fourgonnette',
+    '6': 'Transports en commun'
+};
 
-        // Codes WORK_AREA utilisés dans DS_RP_NAVETTES_PRINC.
-        // Je garde aussi les anciens codes 1/2/3/4/5 au cas où une autre version du fichier les contient.
-        const WORK_AREA_LABELS = {
-            '10': 'Dans la commune de résidence actuelle',
-            '21': 'Autre commune du département',
-            '22': 'Autre département de la région',
-            '23': 'Hors de la région en métropole',
-            '24T30': 'Autre région hors métropole, y compris étranger',
-            '20_30': 'Dans une autre commune',
-            '1': 'Commune de résidence',
-            '2': 'Autre commune du département de résidence',
-            '3': 'Autre département de la région de résidence',
-            '4': 'Autre région en France métropolitaine ou DOM',
-            '5': 'Étranger',
-            '_T': 'Total',
-            'Z': 'Non applicable / Sans objet'
-        };
+const TRANS_COLORS = {
+    '1': '#94a3b8',
+    '2': '#22c55e',
+    '3': '#06b6d4',
+    '4': '#f97316',
+    '5': '#3b82f6',
+    '6': '#8b5cf6',
+    'OTHER': '#cbd5e1'
+};
 
-        const GEO_OBJECT_LABELS = {
-            AUTO: 'Type auto',
-            COM: 'Commune',
-            EPCI: 'EPCI',
-            DEP: 'Département',
-            REG: 'Région'
-        };
+const WORK_COLORS = {
+    '10': '#2563eb',
+    '21': '#60a5fa',
+    '22': '#38bdf8',
+    '23': '#818cf8',
+    '24T30': '#a78bfa',
+    '20_30': '#1d4ed8'
+};
 
-        let db = null;
-        let tableColumns = [];
-        let measureColumn = null;
-        let currentTransportByWorkArea = {};
+const GEO_LABELS = {
+    AUTO: 'Type auto',
+    COM: 'Commune',
+    EPCI: 'EPCI',
+    DEP: 'Département',
+    REG: 'Région'
+};
 
-        const form = document.getElementById('searchForm');
-        const input = document.getElementById('inseeInput');
-        const geoObjectSelect = document.getElementById('geoObjectSelect');
-        const submitBtn = document.getElementById('submitBtn');
-        const btnText = document.getElementById('btnText');
-        const errorContainer = document.getElementById('errorContainer');
-        const errorMessage = document.getElementById('errorMessage');
-        const resultsContainer = document.getElementById('resultsContainer');
-        const resolvedInfo = document.getElementById('resolvedInfo');
-        const dbStatus = document.getElementById('dbStatus');
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
+let db = null;
+let availableGeoObjects = new Set();
+let availableYears = [];
+let currentModalData = {};
 
-        function updateSubmitState() {
-            submitBtn.disabled = !db || !input.value.trim();
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const dbStatus = document.getElementById('dbStatus');
+const form = document.getElementById('searchForm');
+const territoryInput = document.getElementById('territoryInput');
+const geoObjectSelect = document.getElementById('geoObjectSelect');
+const submitBtn = document.getElementById('submitBtn');
+const btnText = document.getElementById('btnText');
+const errorContainer = document.getElementById('errorContainer');
+const errorMessage = document.getElementById('errorMessage');
+const resolvedInfo = document.getElementById('resolvedInfo');
+const resultsContainer = document.getElementById('resultsContainer');
+const donutTooltip = document.getElementById('donutTooltip');
+
+function escapeHTML(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function normalizeCode(value) {
+    return String(value ?? '').trim().toUpperCase().replaceAll(' ', '');
+}
+
+function formatNumber(value) {
+    return Math.round(value || 0).toLocaleString('fr-FR');
+}
+
+function formatPct(value, digits = 1) {
+    if (!Number.isFinite(value)) return '—';
+    return value.toFixed(digits).replace('.', ',') + ' %';
+}
+
+function showError(msg) {
+    if (msg) {
+        errorMessage.textContent = msg;
+        errorContainer.classList.remove('hidden');
+    } else {
+        errorContainer.classList.add('hidden');
+    }
+}
+
+function setBusy(isBusy, label = 'Analyser') {
+    btnText.textContent = isBusy ? label : 'Analyser';
+    submitBtn.disabled = isBusy || !db || !territoryInput.value.trim();
+}
+
+function updateSubmitState() {
+    submitBtn.disabled = !db || !territoryInput.value.trim();
+}
+
+function queryRows(sql, params = {}) {
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
+}
+
+function tableExists(name) {
+    const rows = queryRows("SELECT name FROM sqlite_master WHERE type='table' AND name = :name", { ':name': name });
+    return rows.length > 0;
+}
+
+function isDirectCode(raw) {
+    const c = normalizeCode(raw);
+    return /^\d{9}$/.test(c) || /^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c) || /^(2A|2B|\d{2}|97\d)$/.test(c);
+}
+
+function inferGeoObjectFromCode(code) {
+    const c = normalizeCode(code);
+    if (/^\d{9}$/.test(c)) return 'EPCI';
+    if (/^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c)) return 'COM';
+    if (/^97\d$/.test(c)) return 'DEP';
+    if (/^\d{2}$/.test(c) || /^2[AB]$/.test(c)) return 'DEP';
+    return 'COM';
+}
+
+async function fetchJSON(url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Erreur API géographique HTTP ${response.status}`);
+    return await response.json();
+}
+
+async function resolveTerritory(raw, selectedGeoObject) {
+    const input = normalizeCode(raw);
+    const wanted = selectedGeoObject || 'AUTO';
+
+    if (isDirectCode(input)) {
+        const geoObject = wanted === 'AUTO' ? inferGeoObjectFromCode(input) : wanted;
+        return { code: input, geoObject, label: input, via: 'code saisi directement' };
+    }
+
+    const communeUrl = `${GEO_API_BASE}/communes?nom=${encodeURIComponent(raw)}&fields=nom,code,codeEpci,codeDepartement,codeRegion&boost=population&limit=5`;
+    const communes = await fetchJSON(communeUrl);
+    if (!communes.length) {
+        throw new Error(`Aucune commune trouvée pour « ${raw} ». Essaie avec le code INSEE directement.`);
+    }
+    const commune = communes[0];
+    const geoObject = wanted === 'AUTO' ? 'COM' : wanted;
+
+    if (geoObject === 'COM') {
+        return { code: commune.code, geoObject: 'COM', label: `${commune.nom} (${commune.code})`, via: 'résolu depuis le nom de commune' };
+    }
+    if (geoObject === 'EPCI') {
+        if (!commune.codeEpci) throw new Error(`L'API n'a pas renvoyé d'EPCI pour ${commune.nom}.`);
+        return { code: commune.codeEpci, geoObject: 'EPCI', label: `EPCI de ${commune.nom} (${commune.codeEpci})`, via: 'résolu depuis la commune' };
+    }
+    if (geoObject === 'DEP') {
+        return { code: commune.codeDepartement, geoObject: 'DEP', label: `Département de ${commune.nom} (${commune.codeDepartement})`, via: 'résolu depuis la commune' };
+    }
+    if (geoObject === 'REG') {
+        return { code: commune.codeRegion, geoObject: 'REG', label: `Région de ${commune.nom} (${commune.codeRegion})`, via: 'résolu depuis la commune' };
+    }
+    throw new Error(`Type de territoire non reconnu : ${geoObject}`);
+}
+
+function showResolvedInfo(resolved) {
+    if (!resolved) {
+        resolvedInfo.classList.add('hidden');
+        resolvedInfo.innerHTML = '';
+        return;
+    }
+    resolvedInfo.classList.remove('hidden');
+    resolvedInfo.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold">Zone utilisée :</span>
+            <span>${escapeHTML(resolved.label)}</span>
+            <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-medium">${GEO_LABELS[resolved.geoObject] || resolved.geoObject}</span>
+            <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">geo=${escapeHTML(resolved.code)}</span>
+            <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">geo_object=${resolved.geoObject}</span>
+            <span class="text-xs text-blue-700">${escapeHTML(resolved.via || '')}</span>
+        </div>
+    `;
+}
+
+async function loadDatabaseFromFile(file) {
+    showError('');
+    resultsContainer.innerHTML = '';
+    resolvedInfo.classList.add('hidden');
+    dbStatus.classList.remove('hidden');
+    dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800';
+    dbStatus.textContent = 'Chargement de la base en cours...';
+    dropZone.style.display = 'none';
+
+    try {
+        const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+        const arrayBuffer = await file.arrayBuffer();
+        db = new SQL.Database(new Uint8Array(arrayBuffer));
+
+        if (!tableExists('mobpro_agg')) {
+            throw new Error("Cette base ne contient pas la table mobpro_agg. Utilise le script Python MOBPRO pour créer data_mobpro.sqlite.");
         }
 
-        function setBusy(isBusy, label = 'Analyser') {
-            submitBtn.disabled = isBusy || !db || !input.value.trim();
-            btnText.textContent = isBusy ? label : 'Analyser';
-        }
+        availableGeoObjects = new Set(queryRows('SELECT DISTINCT geo_object FROM mobpro_agg ORDER BY geo_object').map(r => r.geo_object));
+        availableYears = queryRows('SELECT DISTINCT year FROM mobpro_agg ORDER BY year').map(r => Number(r.year));
 
-        function showError(msg) {
-            if (msg) {
-                errorMessage.textContent = msg;
-                errorContainer.classList.remove('hidden');
-            } else {
-                errorContainer.classList.add('hidden');
-            }
-        }
+        dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800';
+        dbStatus.innerHTML = `Base chargée : ${escapeHTML(file.name)} · ${availableYears.join(', ')} · ${Array.from(availableGeoObjects).join(', ')}`;
 
-        function showResolvedInfo(resolved) {
-            if (!resolved) {
-                resolvedInfo.classList.add('hidden');
-                resolvedInfo.innerHTML = '';
-                return;
-            }
+        territoryInput.disabled = false;
+        geoObjectSelect.disabled = false;
+        territoryInput.focus();
+        updateSubmitState();
+    } catch (err) {
+        console.error(err);
+        db = null;
+        dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
+        dbStatus.textContent = 'Échec du chargement du fichier.';
+        showError(err.message);
+        dropZone.style.display = 'block';
+    }
+}
 
-            resolvedInfo.classList.remove('hidden');
-            resolvedInfo.innerHTML = `
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-semibold">Zone utilisée :</span>
-                    <span>${escapeHTML(resolved.label || resolved.code)}</span>
-                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-medium">${GEO_OBJECT_LABELS[resolved.geoObject] || resolved.geoObject}</span>
-                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">GEO=${escapeHTML(resolved.code)}</span>
-                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">GEO_OBJECT=${resolved.geoObject}</span>
-                    ${resolved.via ? `<span class="text-xs text-blue-700">${escapeHTML(resolved.via)}</span>` : ''}
+function getLatestYearForTerritory(resolved) {
+    const rows = queryRows(
+        `SELECT MAX(year) AS latest_year FROM mobpro_agg WHERE geo_object = :geoObject AND geo = :geo`,
+        { ':geoObject': resolved.geoObject, ':geo': resolved.code }
+    );
+    return rows[0]?.latest_year ? Number(rows[0].latest_year) : null;
+}
+
+function getYearsForTerritory(resolved) {
+    return queryRows(
+        `SELECT DISTINCT year FROM mobpro_agg WHERE geo_object = :geoObject AND geo = :geo ORDER BY year`,
+        { ':geoObject': resolved.geoObject, ':geo': resolved.code }
+    ).map(r => Number(r.year));
+}
+
+function getWorkTotals(resolved, year) {
+    const rows = queryRows(
+        `SELECT work_area, SUM(value) AS value
+         FROM mobpro_agg
+         WHERE geo_object = :geoObject AND geo = :geo AND year = :year
+         GROUP BY work_area`,
+        { ':geoObject': resolved.geoObject, ':geo': resolved.code, ':year': year }
+    );
+    const byWork = {};
+    for (const row of rows) byWork[row.work_area] = Number(row.value) || 0;
+    byWork['20_30'] = CHILD_WORK_AREAS.reduce((sum, code) => sum + (byWork[code] || 0), 0);
+    const total = (byWork['10'] || 0) + (byWork['20_30'] || 0);
+    return { byWork, total };
+}
+
+function getTransportForWorkArea(resolved, year, workArea) {
+    const params = { ':geoObject': resolved.geoObject, ':geo': resolved.code, ':year': year };
+    let condition = 'work_area = :workArea';
+    if (workArea === '20_30') {
+        condition = `work_area IN ('21', '22', '23', '24T30')`;
+    } else {
+        params[':workArea'] = workArea;
+    }
+
+    const rows = queryRows(
+        `SELECT trans, SUM(value) AS value
+         FROM mobpro_agg
+         WHERE geo_object = :geoObject AND geo = :geo AND year = :year AND ${condition}
+         GROUP BY trans`,
+        params
+    );
+    return rows
+        .map(r => ({ code: String(r.trans), label: TRANS_LABELS[String(r.trans)] || `Mode ${r.trans}`, value: Number(r.value) || 0 }))
+        .filter(r => r.value > 0)
+        .sort((a, b) => TRANS_ORDER.indexOf(a.code) - TRANS_ORDER.indexOf(b.code));
+}
+
+function getTransportByWorkAreas(resolved, year) {
+    const output = {};
+    for (const code of ['10', '20_30', ...CHILD_WORK_AREAS]) {
+        output[code] = getTransportForWorkArea(resolved, year, code);
+    }
+    return output;
+}
+
+function pct(value, total) {
+    return total > 0 ? (value / total) * 100 : 0;
+}
+
+function buildDonutHTML(title, rows) {
+    const total = rows.reduce((sum, item) => sum + item.value, 0);
+    if (!rows.length || total <= 0) {
+        return `<div class="text-sm text-slate-500">Aucune donnée modale disponible.</div>`;
+    }
+
+    let cursor = 0;
+    const stops = [];
+    for (const item of rows) {
+        const start = cursor;
+        const end = cursor + (item.value / total) * 100;
+        const color = TRANS_COLORS[item.code] || TRANS_COLORS.OTHER;
+        stops.push(`${color} ${start.toFixed(3)}% ${end.toFixed(3)}%`);
+        cursor = end;
+    }
+    if (cursor < 100) stops.push(`${TRANS_COLORS.OTHER} ${cursor.toFixed(3)}% 100%`);
+
+    const legend = rows.map(item => {
+        const itemPct = pct(item.value, total);
+        return `
+            <div class="flex items-center justify-between gap-3 text-xs">
+                <span class="flex items-center gap-2 min-w-0">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full" style="background:${TRANS_COLORS[item.code] || TRANS_COLORS.OTHER}"></span>
+                    <span class="truncate">${escapeHTML(item.label)}</span>
+                </span>
+                <span class="font-semibold tabular-nums whitespace-nowrap">${formatPct(itemPct)}</span>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="flex gap-4 items-center">
+            <div class="donut-chart" style="background: conic-gradient(${stops.join(', ')})">
+                <div class="donut-hole"><span class="text-xs font-bold text-slate-700">${formatNumber(total)}</span></div>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p class="font-semibold text-slate-900 mb-2">${escapeHTML(title)}</p>
+                <div class="space-y-1.5">${legend}</div>
+            </div>
+        </div>
+    `;
+}
+
+function showDonutTooltip(event, workArea) {
+    const rows = currentModalData[workArea] || [];
+    donutTooltip.innerHTML = buildDonutHTML(WORK_LABELS[workArea] || workArea, rows);
+    donutTooltip.style.display = 'block';
+    moveDonutTooltip(event);
+}
+
+function moveDonutTooltip(event) {
+    if (donutTooltip.style.display !== 'block') return;
+    const margin = 16;
+    const rect = donutTooltip.getBoundingClientRect();
+    let left = event.clientX + 18;
+    let top = event.clientY + 18;
+    if (left + rect.width + margin > window.innerWidth) left = event.clientX - rect.width - 18;
+    if (top + rect.height + margin > window.innerHeight) top = event.clientY - rect.height - 18;
+    donutTooltip.style.left = `${Math.max(margin, left)}px`;
+    donutTooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function hideDonutTooltip() {
+    donutTooltip.style.display = 'none';
+}
+
+function hoverAttrs(workArea) {
+    return `data-work-area="${workArea}" onmouseenter="showDonutTooltip(event, '${workArea}')" onmousemove="moveDonutTooltip(event)" onmouseleave="hideDonutTooltip()"`;
+}
+
+function renderMainBars(byWork, total) {
+    const ownVal = byWork['10'] || 0;
+    const otherVal = byWork['20_30'] || 0;
+    const ownPct = pct(ownVal, total);
+    const otherPct = pct(otherVal, total);
+
+    const childSegments = CHILD_WORK_AREAS.map(code => {
+        const value = byWork[code] || 0;
+        const width = otherVal > 0 ? (value / otherVal) * 100 : 0;
+        if (value <= 0) return '';
+        return `
+            <div class="hoverable h-full flex items-center justify-center overflow-hidden text-[11px] font-semibold text-white/95"
+                 style="width:${width}%; background:${WORK_COLORS[code]}" ${hoverAttrs(code)}
+                 title="${escapeHTML(WORK_LABELS[code])}">
+                ${width >= 13 ? escapeHTML(WORK_LABELS[code].replace('Autre ', '').replace('Hors de la région ', 'Hors région ')) : ''}
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+            <div class="p-6 md:p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900">Lieu de travail des résidents</h2>
+                    <p class="text-sm text-slate-500 mt-1">Survole les barres ou les segments pour afficher la répartition modale réelle issue du fichier détail.</p>
                 </div>
-            `;
-        }
-
-        function escapeHTML(value) {
-            return String(value)
-                .replaceAll('&', '&amp;')
-                .replaceAll('<', '&lt;')
-                .replaceAll('>', '&gt;')
-                .replaceAll('"', '&quot;')
-                .replaceAll("'", '&#039;');
-        }
-
-        function quoteIdent(identifier) {
-            return '"' + String(identifier).replaceAll('"', '""') + '"';
-        }
-
-        function hasColumn(name) {
-            return tableColumns.includes(name);
-        }
-
-        function requiredColumn(name) {
-            if (!hasColumn(name)) {
-                throw new Error(`Colonne manquante dans la table navettes : ${name}`);
-            }
-            return quoteIdent(name);
-        }
-
-        function normalizeCode(raw) {
-            return String(raw).trim().toUpperCase().replaceAll(' ', '');
-        }
-
-        function isDirectCode(raw) {
-            const c = normalizeCode(raw);
-            return /^\d{9}$/.test(c) || /^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c) || /^(2A|2B|\d{2}|97\d)$/.test(c) || /^\d{2}$/.test(c);
-        }
-
-        function isCommuneCode(raw) {
-            const c = normalizeCode(raw);
-            return /^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c);
-        }
-
-        function detectGeoObject(code) {
-            const c = normalizeCode(code);
-            if (/^\d{9}$/.test(c)) return 'EPCI';
-            if (/^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c)) return 'COM';
-            if (/^(2A|2B|\d{2}|97\d)$/.test(c)) return 'DEP';
-            return 'COM';
-        }
-
-        function selectedGeoObject() {
-            return geoObjectSelect.value;
-        }
-
-        function getMeasureColumn() {
-            if (hasColumn('RP_MEASURE')) return 'RP_MEASURE';
-            if (hasColumn('MEASURE')) return 'MEASURE';
-            throw new Error('Impossible de trouver la colonne de mesure : RP_MEASURE ou MEASURE.');
-        }
-
-        function buildBaseWhere(prefix = '', includeTrans = true) {
-            const p = prefix;
-            const clauses = [
-                `${requiredColumn('GEO')} = :${p}geo`,
-                `${requiredColumn('GEO_OBJECT')} = :${p}geoObject`,
-                `${requiredColumn('AGE')} = :${p}age`,
-                `${requiredColumn('EMPSTA_ENQ')} = :${p}empsta`
-            ];
-
-            if (includeTrans) {
-                clauses.push(`${requiredColumn('TRANS')} = :${p}trans`);
-            }
-
-            if (hasColumn('FREQ')) {
-                clauses.push(`${quoteIdent('FREQ')} = :${p}freq`);
-            }
-
-            if (measureColumn) {
-                clauses.push(`${quoteIdent(measureColumn)} = :${p}measure`);
-            }
-
-            return clauses.join('\n                      AND ');
-        }
-
-        function baseParams(code, geoObject, prefix = '', trans = '_T') {
-            const p = prefix;
-            const params = {};
-            params[`:${p}geo`] = code;
-            params[`:${p}geoObject`] = geoObject;
-            params[`:${p}age`] = 'Y_GE15';
-            params[`:${p}empsta`] = '1';
-            params[`:${p}trans`] = trans;
-            if (hasColumn('FREQ')) params[`:${p}freq`] = 'A';
-            if (measureColumn) params[`:${p}measure`] = 'POP';
-            return params;
-        }
-
-        function queryOne(sql, params) {
-            const stmt = db.prepare(sql);
-            stmt.bind(params);
-            let obj = null;
-            if (stmt.step()) obj = stmt.getAsObject();
-            stmt.free();
-            return obj;
-        }
-
-        function queryAll(sql, params) {
-            const stmt = db.prepare(sql);
-            stmt.bind(params);
-            const rows = [];
-            while (stmt.step()) rows.push(stmt.getAsObject());
-            stmt.free();
-            return rows;
-        }
-
-        function getDistinctValues(column, code) {
-            if (!hasColumn(column)) return [];
-            const sql = `
-                SELECT DISTINCT ${quoteIdent(column)} AS value
-                FROM navettes
-                WHERE ${requiredColumn('GEO')} = :geo
-                ORDER BY ${quoteIdent(column)}
-                LIMIT 20
-            `;
-            return queryAll(sql, { ':geo': code }).map(row => row.value);
-        }
-
-        function getLatestYear(code, geoObject) {
-            const sql = `
-                SELECT MAX(${requiredColumn('TIME_PERIOD')}) AS latest_year
-                FROM navettes
-                WHERE ${buildBaseWhere()}
-                  AND ${requiredColumn('WORK_AREA')} = :workArea
-            `;
-            const params = { ...baseParams(code, geoObject), ':workArea': '_T' };
-            const row = queryOne(sql, params);
-            return row ? row.latest_year : null;
-        }
-
-        function getOfficialTotal(code, geoObject, year) {
-            const sql = `
-                SELECT ${requiredColumn('OBS_VALUE')} AS total
-                FROM navettes
-                WHERE ${buildBaseWhere()}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} = :workArea
-                LIMIT 1
-            `;
-            const params = { ...baseParams(code, geoObject), ':year': String(year), ':workArea': '_T' };
-            const row = queryOne(sql, params);
-            return row ? Number(row.total) : null;
-        }
-
-        function getTotalForTrans(code, geoObject, year, transCode) {
-            const sql = `
-                SELECT ${requiredColumn('OBS_VALUE')} AS total
-                FROM navettes
-                WHERE ${buildBaseWhere()}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} = :workArea
-                LIMIT 1
-            `;
-            const params = { ...baseParams(code, geoObject, '', transCode), ':year': String(year), ':workArea': '_T' };
-            const row = queryOne(sql, params);
-            return row ? Number(row.total) : null;
-        }
-
-        function hasDetailedTransportByWorkArea(code, geoObject, year) {
-            const sql = `
-                SELECT COUNT(*) AS n
-                FROM navettes
-                WHERE ${buildBaseWhere('', false)}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
-                  AND ${requiredColumn('TRANS')} NOT IN ('_T', 'Z')
-            `;
-            const params = { ...baseParams(code, geoObject), ':year': String(year) };
-            delete params[':trans'];
-            const row = queryOne(sql, params);
-            return Number(row?.n || 0) > 0;
-        }
-
-        function getWorkAreaDetails(code, geoObject, year) {
-            const sql = `
-                SELECT ${requiredColumn('WORK_AREA')} AS work_area,
-                       ${requiredColumn('OBS_VALUE')} AS value
-                FROM navettes
-                WHERE ${buildBaseWhere()}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
-                ORDER BY ${requiredColumn('OBS_VALUE')} DESC
-            `;
-            const params = { ...baseParams(code, geoObject), ':year': String(year) };
-            return queryAll(sql, params).map(row => ({
-                code: String(row.work_area),
-                label: WORK_AREA_LABELS[String(row.work_area)] || `Code inconnu (${row.work_area})`,
-                value: Number(row.value)
-            }));
-        }
-
-        function getWorkAreaDetailsForTrans(code, geoObject, year, transCode) {
-            const sql = `
-                SELECT ${requiredColumn('WORK_AREA')} AS work_area,
-                       ${requiredColumn('OBS_VALUE')} AS value
-                FROM navettes
-                WHERE ${buildBaseWhere()}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
-                ORDER BY ${requiredColumn('OBS_VALUE')} DESC
-            `;
-            const params = { ...baseParams(code, geoObject, '', transCode), ':year': String(year) };
-            return queryAll(sql, params).map(row => ({
-                code: String(row.work_area),
-                label: WORK_AREA_LABELS[String(row.work_area)] || `Code inconnu (${row.work_area})`,
-                value: Number(row.value)
-            }));
-        }
-
-        function getTransportDistribution(code, geoObject, year, workAreaCode) {
-            const sql = `
-                SELECT ${requiredColumn('TRANS')} AS trans,
-                       ${requiredColumn('OBS_VALUE')} AS value
-                FROM navettes
-                WHERE ${buildBaseWhere('', false)}
-                  AND ${requiredColumn('TIME_PERIOD')} = :year
-                  AND ${requiredColumn('WORK_AREA')} = :workArea
-                  AND ${requiredColumn('TRANS')} NOT IN ('_T', 'Z')
-            `;
-            const params = { ...baseParams(code, geoObject), ':year': String(year), ':workArea': String(workAreaCode) };
-            delete params[':trans'];
-            const rawRows = queryAll(sql, params).map(row => ({
-                code: String(row.trans),
-                label: TRANS_LABELS[String(row.trans)] || `Code transport inconnu (${row.trans})`,
-                value: Number(row.value),
-                color: TRANS_COLORS[String(row.trans)] || TRANS_COLORS.OTHER
-            }));
-
-            const orderIndex = code => {
-                const idx = TRANSPORT_ORDER.indexOf(code);
-                return idx === -1 ? 999 : idx;
-            };
-
-            const rows = rawRows
-                .filter(row => row.value > 0)
-                .sort((a, b) => orderIndex(a.code) - orderIndex(b.code));
-
-            const total = rows.reduce((acc, row) => acc + row.value, 0);
-            return rows.map(row => ({
-                ...row,
-                percentage: total > 0 ? (row.value / total) * 100 : 0
-            }));
-        }
-
-        function getTransportDistributions(code, geoObject, year, workAreaCodes) {
-            const distributions = {};
-            Array.from(new Set(workAreaCodes.filter(Boolean))).forEach(workAreaCode => {
-                distributions[workAreaCode] = getTransportDistribution(code, geoObject, year, workAreaCode);
-            });
-            return distributions;
-        }
-
-        function getTemporalAnalysis(code, geoObject) {
-            const dataByYear = {};
-            const workAreaCodes = new Set();
-
-            TEMPORAL_YEARS.forEach(year => {
-                const total = getOfficialTotal(code, geoObject, year);
-                if (total === null || Number.isNaN(total) || total <= 0) return;
-
-                const details = getWorkAreaDetails(code, geoObject, year);
-                const carDetails = getWorkAreaDetailsForTrans(code, geoObject, year, '5');
-                const carByCode = {};
-                carDetails.forEach(item => {
-                    carByCode[item.code] = item;
-                });
-
-                const globalCarValue = getTotalForTrans(code, geoObject, year, '5');
-                const globalCar = globalCarValue !== null && !Number.isNaN(globalCarValue)
-                    ? {
-                        value: globalCarValue,
-                        percentage: (globalCarValue / total) * 100
-                    }
-                    : null;
-
-                const detailsByCode = {};
-                details.forEach(item => {
-                    workAreaCodes.add(item.code);
-                    const carValue = carByCode[item.code]?.value ?? null;
-                    detailsByCode[item.code] = {
-                        ...item,
-                        percentage: (item.value / total) * 100,
-                        carValue,
-                        carPercentage: carValue !== null && item.value > 0 ? (carValue / item.value) * 100 : null
-                    };
-                });
-
-                dataByYear[year] = { total, detailsByCode, globalCar };
-            });
-
-            const rows = Array.from(workAreaCodes).map(codeWA => {
-                const values = {};
-                const carValues = {};
-                TEMPORAL_YEARS.forEach(year => {
-                    const yearValue = dataByYear[year]?.detailsByCode?.[codeWA] || null;
-                    values[year] = yearValue;
-                    carValues[year] = yearValue && yearValue.carPercentage !== null
-                        ? {
-                            value: yearValue.carValue,
-                            percentage: yearValue.carPercentage
-                        }
-                        : null;
-                });
-
-                const first = values['2011'];
-                const last = values['2022'];
-                const pointEvolution = first && last ? last.percentage - first.percentage : null;
-                const relativeEvolution = first && last && first.percentage !== 0
-                    ? ((last.percentage - first.percentage) / first.percentage) * 100
-                    : null;
-
-                const firstCar = carValues['2011'];
-                const lastCar = carValues['2022'];
-                const carPointEvolution = firstCar && lastCar ? lastCar.percentage - firstCar.percentage : null;
-                const carRelativeEvolution = firstCar && lastCar && firstCar.percentage !== 0
-                    ? ((lastCar.percentage - firstCar.percentage) / firstCar.percentage) * 100
-                    : null;
-
-                return {
-                    code: codeWA,
-                    label: WORK_AREA_LABELS[codeWA] || `Code inconnu (${codeWA})`,
-                    values,
-                    carValues,
-                    pointEvolution,
-                    relativeEvolution,
-                    carPointEvolution,
-                    carRelativeEvolution,
-                    sortValue: last?.percentage ?? values['2016']?.percentage ?? first?.percentage ?? 0
-                };
-            }).sort((a, b) => b.sortValue - a.sortValue);
-
-            const hasCarByWorkArea = rows.some(row =>
-                TEMPORAL_YEARS.some(year => row.carValues[year]?.percentage !== null && row.carValues[year]?.percentage !== undefined)
-            );
-
-            const globalCarValues = {};
-            TEMPORAL_YEARS.forEach(year => {
-                globalCarValues[year] = dataByYear[year]?.globalCar || null;
-            });
-            const firstGlobalCar = globalCarValues['2011'];
-            const lastGlobalCar = globalCarValues['2022'];
-            const globalCarPointEvolution = firstGlobalCar && lastGlobalCar ? lastGlobalCar.percentage - firstGlobalCar.percentage : null;
-            const globalCarRelativeEvolution = firstGlobalCar && lastGlobalCar && firstGlobalCar.percentage !== 0
-                ? ((lastGlobalCar.percentage - firstGlobalCar.percentage) / firstGlobalCar.percentage) * 100
-                : null;
-
-            return {
-                dataByYear,
-                rows,
-                hasCarByWorkArea,
-                globalCar: {
-                    values: globalCarValues,
-                    pointEvolution: globalCarPointEvolution,
-                    relativeEvolution: globalCarRelativeEvolution
-                }
-            };
-        }
-
-
-        async function fetchJson(url) {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Erreur API ${response.status} sur ${url}`);
-            }
-            return await response.json();
-        }
-
-        async function fetchFirst(url, notFoundMessage) {
-            const data = await fetchJson(url);
-            if (!Array.isArray(data) || data.length === 0) {
-                throw new Error(notFoundMessage);
-            }
-            return data[0];
-        }
-
-        async function getCommuneByName(name) {
-            const fields = 'nom,code,codeEpci,epci,codeDepartement,departement,codeRegion,region,population';
-            const url = `${GEO_API_BASE}/communes?nom=${encodeURIComponent(name)}&boost=population&fields=${fields}&format=json&limit=5`;
-            return await fetchFirst(url, `Aucune commune trouvée pour « ${name} ».`);
-        }
-
-        async function getCommuneByCode(code) {
-            const fields = 'nom,code,codeEpci,epci,codeDepartement,departement,codeRegion,region,population';
-            const url = `${GEO_API_BASE}/communes/${encodeURIComponent(code)}?fields=${fields}&format=json`;
-            return await fetchJson(url);
-        }
-
-        async function getEpciByName(name) {
-            const fields = 'nom,code,population,type';
-            const url = `${GEO_API_BASE}/epcis?nom=${encodeURIComponent(name)}&boost=population&fields=${fields}&format=json&limit=5`;
-            return await fetchFirst(url, `Aucun EPCI trouvé directement pour « ${name} ».`);
-        }
-
-        async function getEpciByCode(code) {
-            const fields = 'nom,code,population,type';
-            const url = `${GEO_API_BASE}/epcis/${encodeURIComponent(code)}?fields=${fields}&format=json`;
-            return await fetchJson(url);
-        }
-
-        async function getDepartementByName(name) {
-            const fields = 'nom,code,codeRegion,region';
-            const url = `${GEO_API_BASE}/departements?nom=${encodeURIComponent(name)}&fields=${fields}&format=json&limit=5`;
-            return await fetchFirst(url, `Aucun département trouvé directement pour « ${name} ».`);
-        }
-
-        async function getDepartementByCode(code) {
-            const fields = 'nom,code,codeRegion,region';
-            const url = `${GEO_API_BASE}/departements/${encodeURIComponent(code)}?fields=${fields}&format=json`;
-            return await fetchJson(url);
-        }
-
-        async function getRegionByName(name) {
-            const fields = 'nom,code';
-            const url = `${GEO_API_BASE}/regions?nom=${encodeURIComponent(name)}&fields=${fields}&format=json&limit=5`;
-            return await fetchFirst(url, `Aucune région trouvée directement pour « ${name} ».`);
-        }
-
-        async function getRegionByCode(code) {
-            const fields = 'nom,code';
-            const url = `${GEO_API_BASE}/regions/${encodeURIComponent(code)}?fields=${fields}&format=json`;
-            return await fetchJson(url);
-        }
-
-        async function resolveFromCommuneObject(commune, target) {
-            if (target === 'AUTO' || target === 'COM') {
-                return {
-                    code: commune.code,
-                    geoObject: 'COM',
-                    label: commune.nom,
-                    via: 'résolu par recherche communale'
-                };
-            }
-
-            if (target === 'EPCI') {
-                const epciName = commune.epci?.nom || 'EPCI de la commune';
-                return {
-                    code: commune.codeEpci,
-                    geoObject: 'EPCI',
-                    label: epciName,
-                    via: `depuis la commune ${commune.nom}`
-                };
-            }
-
-            if (target === 'DEP') {
-                return {
-                    code: commune.codeDepartement,
-                    geoObject: 'DEP',
-                    label: commune.departement?.nom || `Département ${commune.codeDepartement}`,
-                    via: `depuis la commune ${commune.nom}`
-                };
-            }
-
-            if (target === 'REG') {
-                return {
-                    code: commune.codeRegion,
-                    geoObject: 'REG',
-                    label: commune.region?.nom || `Région ${commune.codeRegion}`,
-                    via: `depuis la commune ${commune.nom}`
-                };
-            }
-
-            throw new Error(`Type de territoire non reconnu : ${target}`);
-        }
-
-        async function resolveGeoInput(rawInput) {
-            const raw = rawInput.trim();
-            const target = selectedGeoObject();
-            const normalized = normalizeCode(raw);
-
-            // Cas 1 : l'utilisateur saisit déjà un code.
-            if (isDirectCode(raw)) {
-                // Si c'est un code commune et qu'on demande l'EPCI, le département ou la région,
-                // on interroge l'API pour remonter au bon niveau.
-                if (isCommuneCode(raw) && ['EPCI', 'DEP', 'REG'].includes(target)) {
-                    const commune = await getCommuneByCode(normalized);
-                    return await resolveFromCommuneObject(commune, target);
-                }
-
-                const geoObject = target === 'AUTO' ? detectGeoObject(normalized) : target;
-                let label = normalized;
-
-                try {
-                    if (geoObject === 'COM') label = (await getCommuneByCode(normalized)).nom || label;
-                    if (geoObject === 'EPCI') label = (await getEpciByCode(normalized)).nom || label;
-                    if (geoObject === 'DEP') label = (await getDepartementByCode(normalized)).nom || label;
-                    if (geoObject === 'REG') label = (await getRegionByCode(normalized)).nom || label;
-                } catch (err) {
-                    console.warn('Libellé non récupéré, utilisation du code seul.', err);
-                }
-
-                return {
-                    code: normalized,
-                    geoObject,
-                    label,
-                    via: 'code saisi directement'
-                };
-            }
-
-            // Cas 2 : l'utilisateur saisit un nom.
-            // Pour COM : recherche commune.
-            // Pour EPCI/DEP/REG : on tente d'abord une recherche directe du niveau demandé,
-            // puis un fallback par commune pour permettre "Bordeaux" -> Bordeaux Métropole / Gironde / Nouvelle-Aquitaine.
-            if (target === 'COM' || target === 'AUTO') {
-                const commune = await getCommuneByName(raw);
-                return await resolveFromCommuneObject(commune, 'COM');
-            }
-
-            if (target === 'EPCI') {
-                try {
-                    const epci = await getEpciByName(raw);
-                    return { code: epci.code, geoObject: 'EPCI', label: epci.nom, via: 'résolu par recherche EPCI directe' };
-                } catch (_) {
-                    const commune = await getCommuneByName(raw);
-                    return await resolveFromCommuneObject(commune, 'EPCI');
-                }
-            }
-
-            if (target === 'DEP') {
-                try {
-                    const dep = await getDepartementByName(raw);
-                    return { code: dep.code, geoObject: 'DEP', label: dep.nom, via: 'résolu par recherche département directe' };
-                } catch (_) {
-                    const commune = await getCommuneByName(raw);
-                    return await resolveFromCommuneObject(commune, 'DEP');
-                }
-            }
-
-            if (target === 'REG') {
-                try {
-                    const reg = await getRegionByName(raw);
-                    return { code: reg.code, geoObject: 'REG', label: reg.nom, via: 'résolu par recherche région directe' };
-                } catch (_) {
-                    const commune = await getCommuneByName(raw);
-                    return await resolveFromCommuneObject(commune, 'REG');
-                }
-            }
-
-            throw new Error(`Type de territoire non reconnu : ${target}`);
-        }
-
-        function formatNumber(value) {
-            if (value === null || value === undefined || Number.isNaN(value)) return '—';
-            return Math.round(value).toLocaleString('fr-FR');
-        }
-
-        function formatPct(value) {
-            if (value === null || value === undefined || Number.isNaN(value)) return '—';
-            return `${value.toFixed(1)} %`;
-        }
-
-        function formatSigned(value, suffix = '') {
-            if (value === null || value === undefined || Number.isNaN(value)) return '—';
-            const sign = value > 0 ? '+' : '';
-            return `${sign}${value.toFixed(1)}${suffix}`;
-        }
-
-        function buildWorkAreaLookup(details) {
-            return Object.fromEntries(details.map(item => [item.code, item]));
-        }
-
-        function workAreaValue(byCode, code) {
-            return byCode[code]?.value ?? 0;
-        }
-
-        function workAreaPercentage(item, total) {
-            return item && total > 0 ? (item.value / total) * 100 : 0;
-        }
-
-        function segmentStyle(code, value, denominator) {
-            const width = denominator > 0 ? Math.max(0, Math.min(100, (value / denominator) * 100)) : 0;
-            const color = WORK_AREA_COLORS[code] || WORK_AREA_COLORS.OTHER;
-            return `width:${width}%;background:${color};`;
-        }
-
-        function renderTransportHint(code, hasCrossTransport) {
-            if (!hasCrossTransport) {
-                return `<span class="text-xs text-amber-600">croisement transport × lieu absent dans cette base</span>`;
-            }
-            const hasDistribution = currentTransportByWorkArea[code]?.length > 0;
-            return hasDistribution
-                ? `<span class="text-xs text-slate-400">survol : parts modales</span>`
-                : `<span class="text-xs text-amber-600">parts modales indisponibles</span>`;
-        }
-
-        function renderMainChart(data, transportByWorkArea, hasCrossTransport) {
-            currentTransportByWorkArea = transportByWorkArea || {};
-            const hoverZoneClass = hasCrossTransport ? 'modal-hover-zone' : '';
-
-            if (data.details.length === 0) {
-                return `<p class="text-slate-500 text-center py-4">Le total existe, mais aucun détail WORK_AREA n'a été trouvé pour ces filtres.</p>`;
-            }
-
-            const byCode = buildWorkAreaLookup(data.details);
-            const same = byCode['10'] || byCode['1'] || null;
-            const parent = byCode['20_30'] || {
-                code: '20_30',
-                label: WORK_AREA_LABELS['20_30'],
-                value: STACK_CHILD_WORK_AREAS.reduce((acc, code) => acc + workAreaValue(byCode, code), 0)
-            };
-            const childItems = STACK_CHILD_WORK_AREAS
-                .map(code => byCode[code])
-                .filter(Boolean);
-            const childSum = childItems.reduce((acc, item) => acc + item.value, 0);
-            const parentPct = workAreaPercentage(parent, data.total);
-            const samePct = workAreaPercentage(same, data.total);
-            const denominator = parent.value > 0 ? parent.value : childSum;
-            const residual = Math.max(0, denominator - childSum);
-
-            const sameHTML = same ? `
-                <div class="space-y-2 ${hoverZoneClass} rounded-xl p-3 -mx-3" data-work-area="${same.code}" data-work-area-label="${escapeHTML(same.label)}">
+                <div class="text-right">
+                    <p class="text-sm text-slate-500 font-medium uppercase tracking-wider">Actifs occupés pondérés</p>
+                    <p class="text-2xl font-bold text-blue-600">${formatNumber(total)}</p>
+                </div>
+            </div>
+
+            <div class="p-6 md:p-8 space-y-8">
+                <div class="space-y-2">
                     <div class="flex justify-between items-end gap-4">
-                        <div>
-                            <span class="font-semibold text-slate-800">${escapeHTML(same.label)}</span>
-                            <div>${renderTransportHint(same.code, hasCrossTransport)}</div>
-                        </div>
-                        <div class="text-right whitespace-nowrap">
-                            <span class="text-lg font-bold text-slate-900">${samePct.toFixed(1)}%</span>
-                            <span class="text-sm text-slate-500 ml-2">(${formatNumber(same.value)})</span>
-                        </div>
+                        <span class="font-semibold text-slate-700">${WORK_LABELS['10']}</span>
+                        <span class="text-right"><b>${formatPct(ownPct)}</b> <span class="text-slate-500 text-sm">(${formatNumber(ownVal)})</span></span>
                     </div>
                     <div class="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
-                        <div class="h-full rounded-full progress-bar" style="width: 0%; background:${WORK_AREA_COLORS[same.code] || WORK_AREA_COLORS.OTHER};" data-target="${Math.min(samePct, 100)}%"></div>
+                        <div class="hoverable h-full rounded-full bar-animate" style="width:${ownPct}%; background:${WORK_COLORS['10']}" ${hoverAttrs('10')}></div>
                     </div>
                 </div>
-            ` : '';
 
-            const segmentsHTML = childItems.map(item => {
-                const childPctOfParent = denominator > 0 ? (item.value / denominator) * 100 : 0;
-                const childPctOfTotal = data.total > 0 ? (item.value / data.total) * 100 : 0;
-                return `
-                    <div class="${hoverZoneClass} h-full flex items-center justify-center text-[11px] font-semibold text-white/95 truncate px-1 transition-all" data-work-area="${item.code}" data-work-area-label="${escapeHTML(item.label)}" title="${escapeHTML(item.label)} — ${childPctOfTotal.toFixed(1)} % du total, ${childPctOfParent.toFixed(1)} % des travailleurs dans une autre commune" style="${segmentStyle(item.code, item.value, denominator)}">
-                        ${childPctOfParent >= 12 ? escapeHTML(item.label.replace('Autre ', '')) : ''}
+                <div class="space-y-2">
+                    <div class="flex justify-between items-end gap-4">
+                        <span class="font-semibold text-slate-700">${WORK_LABELS['20_30']}</span>
+                        <span class="text-right"><b>${formatPct(otherPct)}</b> <span class="text-slate-500 text-sm">(${formatNumber(otherVal)})</span></span>
                     </div>
-                `;
-            }).join('');
-
-            const residualHTML = residual > 1 ? `
-                <div class="h-full flex items-center justify-center text-[11px] font-semibold text-slate-500 bg-slate-200 truncate px-1" title="Écart entre 20_30 et la somme des sous-catégories" style="width:${(residual / denominator) * 100}%">
-                    Écart
-                </div>
-            ` : '';
-
-            const legendHTML = childItems.map(item => `
-                <div class="flex items-center gap-2 text-xs text-slate-600">
-                    <span class="w-3 h-3 rounded-sm" style="background:${WORK_AREA_COLORS[item.code] || WORK_AREA_COLORS.OTHER}"></span>
-                    <span>${escapeHTML(item.label)}</span>
-                </div>
-            `).join('');
-
-            const parentNote = childSum > 0 && Math.abs(parent.value - childSum) > 1
-                ? `<p class="text-xs text-amber-700 mt-2">Attention : 20_30 vaut ${formatNumber(parent.value)} alors que la somme des sous-catégories visibles vaut ${formatNumber(childSum)}. La zone grise signale l'écart éventuel.</p>`
-                : '';
-
-            return `
-                <div id="mainChart" class="relative space-y-7">
-                    <div id="donutTooltip" class="donut-tooltip hidden fixed z-50 pointer-events-none bg-white border border-slate-200 shadow-xl rounded-2xl p-4 text-sm"></div>
-
-                    ${sameHTML}
-
-                    <div class="space-y-3 rounded-xl p-3 -mx-3">
-                        <div class="flex justify-between items-start gap-4 ${hoverZoneClass} rounded-lg p-2 -mx-2" data-work-area="20_30" data-work-area-label="${escapeHTML(parent.label)}">
-                            <div>
-                                <span class="font-semibold text-slate-800">${escapeHTML(parent.label)}</span>
-                                <p class="text-xs text-slate-500 max-w-2xl">Barre globale épaisse, composée par les sous-catégories plus précises.</p>
-                                <div>${renderTransportHint('20_30', hasCrossTransport)}</div>
+                    <div class="w-full bg-slate-100 rounded-full h-10 overflow-hidden">
+                        <div class="hoverable h-full rounded-full overflow-hidden flex bar-animate" style="width:${otherPct}%; background:${WORK_COLORS['20_30']}" ${hoverAttrs('20_30')}>
+                            ${childSegments}
+                        </div>
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-2 pt-2">
+                        ${CHILD_WORK_AREAS.map(code => `
+                            <div class="flex items-center justify-between gap-3 text-sm bg-slate-50 rounded-lg px-3 py-2 border border-slate-100 hoverable" ${hoverAttrs(code)}>
+                                <span class="flex items-center gap-2 min-w-0">
+                                    <span class="inline-block w-3 h-3 rounded-full" style="background:${WORK_COLORS[code]}"></span>
+                                    <span class="truncate">${WORK_LABELS[code]}</span>
+                                </span>
+                                <span class="font-semibold whitespace-nowrap">${formatPct(pct(byWork[code] || 0, total))}</span>
                             </div>
-                            <div class="text-right whitespace-nowrap">
-                                <span class="text-lg font-bold text-slate-900">${parentPct.toFixed(1)}%</span>
-                                <span class="text-sm text-slate-500 ml-2">(${formatNumber(parent.value)})</span>
-                            </div>
-                        </div>
-
-                        <div class="w-full bg-slate-100 rounded-2xl h-12 overflow-hidden">
-                            <div class="h-full rounded-2xl overflow-hidden progress-bar" style="width: 0%;" data-target="${Math.min(parentPct, 100)}%">
-                                <div class="flex h-full w-full">
-                                    ${segmentsHTML}
-                                    ${residualHTML}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="grid sm:grid-cols-2 gap-x-5 gap-y-2 mt-3">${legendHTML}</div>
-                        ${parentNote}
-                    </div>
-
-                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-900">
-                        Le gros bloc « Dans une autre commune » évite de compter deux fois les sous-catégories 21, 22, 23 et 24T30. Les parts modales par lieu ne s'affichent que si la base contient le croisement WORK_AREA × TRANS.
+                        `).join('')}
                     </div>
                 </div>
-            `;
+            </div>
+        </section>
+    `;
+}
+
+function getYearStats(resolved, year) {
+    const work = getWorkTotals(resolved, year);
+    const out = { total: work.total, byWork: work.byWork, carShare: {}, carValue: {} };
+    for (const code of ['10', '20_30', ...CHILD_WORK_AREAS]) {
+        const rows = getTransportForWorkArea(resolved, year, code);
+        const sum = rows.reduce((s, r) => s + r.value, 0);
+        const car = rows.find(r => r.code === '5')?.value || 0;
+        out.carValue[code] = car;
+        out.carShare[code] = sum > 0 ? (car / sum) * 100 : null;
+    }
+    return out;
+}
+
+function computeDelta(a, b) {
+    if (a === null || a === undefined || b === null || b === undefined || !Number.isFinite(a) || !Number.isFinite(b)) {
+        return { points: null, relative: null };
+    }
+    const points = b - a;
+    const relative = a !== 0 ? ((b - a) / a) * 100 : null;
+    return { points, relative };
+}
+
+function renderTemporalTable(resolved, territoryYears) {
+    const years = PREFERRED_TEMPORAL_YEARS.filter(y => territoryYears.includes(y));
+    if (years.length === 0) years.push(...territoryYears);
+    if (years.length === 0) return '';
+
+    const statsByYear = {};
+    for (const year of years) statsByYear[year] = getYearStats(resolved, year);
+    const firstYear = years[0];
+    const lastYear = years[years.length - 1];
+
+    const rowsHTML = ['10', '20_30', ...CHILD_WORK_AREAS].map(code => {
+        const shareCells = years.map(year => {
+            const value = statsByYear[year].byWork[code] || 0;
+            return `<td class="px-3 py-3 text-right font-medium">${formatPct(pct(value, statsByYear[year].total))}</td>`;
+        }).join('');
+
+        const firstShare = pct(statsByYear[firstYear].byWork[code] || 0, statsByYear[firstYear].total);
+        const lastShare = pct(statsByYear[lastYear].byWork[code] || 0, statsByYear[lastYear].total);
+        const delta = computeDelta(firstShare, lastShare);
+
+        const carCells = years.map(year => {
+            const carShare = statsByYear[year].carShare[code];
+            return `<td class="px-3 py-2 text-right text-blue-800">${carShare === null ? '—' : formatPct(carShare)}</td>`;
+        }).join('');
+        const carDelta = computeDelta(statsByYear[firstYear].carShare[code], statsByYear[lastYear].carShare[code]);
+
+        return `
+            <tr class="border-t border-slate-100 bg-white">
+                <td class="px-3 py-3 font-semibold text-slate-800">${escapeHTML(WORK_LABELS[code])}</td>
+                ${shareCells}
+                <td class="px-3 py-3 text-right font-semibold ${delta.points >= 0 ? 'text-emerald-700' : 'text-rose-700'}">${delta.points === null ? '—' : `${delta.points >= 0 ? '+' : ''}${delta.points.toFixed(1).replace('.', ',')} pts`}</td>
+                <td class="px-3 py-3 text-right text-slate-600">${delta.relative === null ? '—' : `${delta.relative >= 0 ? '+' : ''}${delta.relative.toFixed(1).replace('.', ',')} %`}</td>
+            </tr>
+            <tr class="border-t border-blue-50 bg-blue-50/60">
+                <td class="px-3 py-2 pl-8 text-sm text-blue-900">↳ Voiture uniquement, part modale dans cette catégorie</td>
+                ${carCells}
+                <td class="px-3 py-2 text-right text-sm font-semibold ${carDelta.points >= 0 ? 'text-emerald-700' : 'text-rose-700'}">${carDelta.points === null ? '—' : `${carDelta.points >= 0 ? '+' : ''}${carDelta.points.toFixed(1).replace('.', ',')} pts`}</td>
+                <td class="px-3 py-2 text-right text-sm text-blue-900">${carDelta.relative === null ? '—' : `${carDelta.relative >= 0 ? '+' : ''}${carDelta.relative.toFixed(1).replace('.', ',')} %`}</td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+            <div class="p-6 md:p-8 border-b border-slate-100">
+                <h2 class="text-xl font-bold text-slate-900">Évolution temporelle</h2>
+                <p class="text-sm text-slate-500 mt-1">Comparaison des parts par lieu de travail, avec une sous-ligne voiture pour chaque catégorie.</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[820px] text-sm">
+                    <thead class="bg-slate-50 text-slate-600 border-b border-slate-100">
+                        <tr>
+                            <th class="px-3 py-3 text-left font-semibold">Lieu de travail</th>
+                            ${years.map(year => `<th class="px-3 py-3 text-right font-semibold">${year}</th>`).join('')}
+                            <th class="px-3 py-3 text-right font-semibold">Évolution ${firstYear}-${lastYear}</th>
+                            <th class="px-3 py-3 text-right font-semibold">Variation relative</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHTML}</tbody>
+                </table>
+            </div>
+        </section>
+    `;
+}
+
+function renderTransportSummary() {
+    const rows = currentModalData['20_30'] || [];
+    return `
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+            <div class="p-6 md:p-8 border-b border-slate-100">
+                <h2 class="text-xl font-bold text-slate-900">Parts modales croisées</h2>
+                <p class="text-sm text-slate-500 mt-1">Cette fois, les parts modales sont bien croisées avec le lieu de travail, car elles viennent du fichier détail MOBPRO agrégé par IPONDI.</p>
+            </div>
+            <div class="p-6 md:p-8 grid md:grid-cols-2 gap-6">
+                <div class="bg-slate-50 rounded-xl border border-slate-100 p-4">${buildDonutHTML(WORK_LABELS['10'], currentModalData['10'] || [])}</div>
+                <div class="bg-slate-50 rounded-xl border border-slate-100 p-4">${buildDonutHTML(WORK_LABELS['20_30'], rows)}</div>
+            </div>
+        </section>
+    `;
+}
+
+async function analyze(rawInput, selectedGeoObject) {
+    if (!db) return;
+    showError('');
+    resultsContainer.innerHTML = '';
+    showResolvedInfo(null);
+    setBusy(true, 'Analyse...');
+
+    try {
+        const resolved = await resolveTerritory(rawInput, selectedGeoObject);
+        showResolvedInfo(resolved);
+
+        if (!availableGeoObjects.has(resolved.geoObject)) {
+            throw new Error(`La base chargée ne contient pas le niveau ${resolved.geoObject}. Vérifie que le script Python a bien agrégé ce niveau, notamment l'EPCI.`);
         }
 
-        function buildDonutHTML(workAreaCode, label) {
-            const rows = currentTransportByWorkArea[workAreaCode] || [];
-            if (!rows.length) {
-                return `
-                    <div class="font-semibold text-slate-900 mb-1">${escapeHTML(label)}</div>
-                    <p class="text-slate-500">Aucune ventilation par mode de transport trouvée pour cette catégorie.</p>
-                `;
-            }
+        const latestYear = getLatestYearForTerritory(resolved);
+        if (!latestYear) {
+            throw new Error(`Aucune donnée trouvée dans la base pour ${GEO_LABELS[resolved.geoObject] || resolved.geoObject} ${resolved.code}.`);
+        }
 
-            let start = 0;
-            const gradientParts = rows.map(row => {
-                const end = start + row.percentage * 3.6;
-                const part = `${row.color} ${start.toFixed(3)}deg ${end.toFixed(3)}deg`;
-                start = end;
-                return part;
-            });
-            if (gradientParts.length === 1) gradientParts.push(`${rows[0].color} ${start.toFixed(3)}deg 360deg`);
+        const territoryYears = getYearsForTerritory(resolved);
+        const { byWork, total } = getWorkTotals(resolved, latestYear);
+        if (!total) {
+            throw new Error(`Aucun actif occupé trouvé pour ${resolved.code} en ${latestYear}.`);
+        }
 
-            const total = rows.reduce((acc, row) => acc + row.value, 0);
-            const legend = rows.map(row => `
-                <div class="flex items-center justify-between gap-3 text-xs">
-                    <div class="flex items-center gap-2 min-w-0">
-                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${row.color}"></span>
-                        <span class="truncate">${escapeHTML(row.label)}</span>
-                    </div>
-                    <div class="font-semibold text-slate-800 whitespace-nowrap">${row.percentage.toFixed(1)} %</div>
+        currentModalData = getTransportByWorkAreas(resolved, latestYear);
+
+        resultsContainer.innerHTML = `
+            <div class="space-y-6">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 text-sm text-slate-600 flex flex-wrap gap-2 items-center justify-between fade-in">
+                    <span><b>Millésime affiché :</b> ${latestYear}</span>
+                    <span><b>Années disponibles pour cette zone :</b> ${territoryYears.join(', ')}</span>
+                    <span><b>Source :</b> MOBPRO agrégé, poids IPONDI</span>
                 </div>
-            `).join('');
+                ${renderMainBars(byWork, total)}
+                ${renderTransportSummary()}
+                ${renderTemporalTable(resolved, territoryYears)}
+            </div>
+        `;
+    } catch (err) {
+        console.error(err);
+        showError(err.message);
+    } finally {
+        setBusy(false);
+    }
+}
 
-            return `
-                <div class="font-semibold text-slate-900 mb-1">${escapeHTML(label)}</div>
-                <div class="text-xs text-slate-500 mb-3">Répartition modale — ${formatNumber(total)} actifs</div>
-                <div class="flex gap-4 items-center">
-                    <div class="donut-chart shrink-0" style="background: conic-gradient(${gradientParts.join(', ')});">
-                        <div class="donut-hole">
-                            <div>
-                                <div class="text-[11px] text-slate-500">Total</div>
-                                <div class="text-sm font-bold text-slate-900">${formatNumber(total)}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="min-w-0 flex-1 space-y-1.5">${legend}</div>
-                </div>
-            `;
-        }
+// Drag & drop
 
-        function renderGlobalTransportCard(transportByWorkArea, hasCrossTransport) {
-            currentTransportByWorkArea = transportByWorkArea || currentTransportByWorkArea || {};
-            const rows = currentTransportByWorkArea['_T'] || [];
-            if (!rows.length) return '';
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    dropZone.classList.add('border-blue-500', 'bg-blue-50');
+});
+dropZone.addEventListener('dragleave', (event) => {
+    event.preventDefault();
+    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+});
+dropZone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    if (event.dataTransfer.files.length) loadDatabaseFromFile(event.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', (event) => {
+    if (event.target.files.length) loadDatabaseFromFile(event.target.files[0]);
+});
 
-            const note = hasCrossTransport
-                ? `La base contient aussi un croisement WORK_AREA × TRANS : les donuts par catégorie peuvent apparaître au survol des barres.`
-                : `Cette base ne contient pas le croisement WORK_AREA × TRANS : on peut afficher la répartition modale globale, mais pas la répartition modale de chaque lieu de travail.`;
+territoryInput.addEventListener('input', updateSubmitState);
+form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    analyze(territoryInput.value.trim(), geoObjectSelect.value);
+});
 
-            return `
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
-                    <div class="p-6 md:p-8 border-b border-slate-100">
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Répartition modale globale</h3>
-                        <p class="text-sm text-slate-500">${note}</p>
-                    </div>
-                    <div class="p-6 md:p-8">
-                        <div class="max-w-2xl">
-                            ${buildDonutHTML('_T', 'Tous lieux de travail confondus')}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function attachDonutHoverHandlers() {
-            const chart = document.getElementById('mainChart');
-            const tooltip = document.getElementById('donutTooltip');
-            if (!chart || !tooltip) return;
-
-            function placeTooltip(event) {
-                const padding = 14;
-                const rect = tooltip.getBoundingClientRect();
-                let left = event.clientX + padding;
-                let top = event.clientY + padding;
-                if (left + rect.width > window.innerWidth - 8) left = event.clientX - rect.width - padding;
-                if (top + rect.height > window.innerHeight - 8) top = window.innerHeight - rect.height - 8;
-                tooltip.style.left = `${Math.max(8, left)}px`;
-                tooltip.style.top = `${Math.max(8, top)}px`;
-            }
-
-            function showForZone(zone, event) {
-                const workAreaCode = zone.dataset.workArea;
-                const label = zone.dataset.workAreaLabel || WORK_AREA_LABELS[workAreaCode] || workAreaCode;
-                tooltip.innerHTML = buildDonutHTML(workAreaCode, label);
-                tooltip.classList.remove('hidden');
-                placeTooltip(event);
-            }
-
-            chart.addEventListener('mousemove', event => {
-                const zone = event.target.closest('.modal-hover-zone');
-                if (!zone || !chart.contains(zone)) {
-                    tooltip.classList.add('hidden');
-                    return;
-                }
-                showForZone(zone, event);
-            });
-
-            chart.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
-        }
-
-        function renderTemporalTable(temporal) {
-            const availableYears = TEMPORAL_YEARS.filter(year => temporal.dataByYear[year]);
-
-            if (availableYears.length === 0 || temporal.rows.length === 0) {
-                return `
-                    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
-                        <div class="p-6 md:p-8">
-                            <h3 class="text-xl font-bold text-slate-900 mb-2">Analyse temporelle 2011 / 2016 / 2022</h3>
-                            <p class="text-slate-500">Aucune donnée temporelle trouvée pour les millésimes 2011, 2016 et 2022 avec les mêmes filtres.</p>
-                        </div>
-                    </div>
-                `;
-            }
-
-            const totalsHTML = TEMPORAL_YEARS.map(year => {
-                const yearData = temporal.dataByYear[year];
-                const labelClass = yearData ? 'bg-slate-100 text-slate-700' : 'bg-amber-100 text-amber-800';
-                return `<span class="inline-block text-xs font-medium ${labelClass} px-2 py-1 rounded-full">${year} : ${yearData ? formatNumber(yearData.total) : 'absent'}</span>`;
-            }).join('');
-
-            const carGlobalCells = TEMPORAL_YEARS.map(year => {
-                const value = temporal.globalCar?.values?.[year];
-                return `<td class="px-4 py-3 text-right whitespace-nowrap">${value ? formatPct(value.percentage) : '—'}</td>`;
-            }).join('');
-
-            const carGlobalEvoClass = temporal.globalCar?.pointEvolution > 0 ? 'text-emerald-700' : temporal.globalCar?.pointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
-            const globalCarRow = `
-                <tr class="border-t border-slate-100 bg-blue-50/50">
-                    <td class="px-4 py-3 font-semibold text-blue-900">Voiture — ensemble des actifs</td>
-                    <td class="px-4 py-3 text-xs text-blue-800">Part modale globale</td>
-                    ${carGlobalCells}
-                    <td class="px-4 py-3 text-right font-semibold whitespace-nowrap ${carGlobalEvoClass}">${formatSigned(temporal.globalCar?.pointEvolution, ' pts')}</td>
-                    <td class="px-4 py-3 text-right whitespace-nowrap ${carGlobalEvoClass}">${formatSigned(temporal.globalCar?.relativeEvolution, ' %')}</td>
-                </tr>
-            `;
-
-            const rowsHTML = temporal.rows.map(row => {
-                const cells = TEMPORAL_YEARS.map(year => {
-                    const value = row.values[year];
-                    return `<td class="px-4 py-3 text-right whitespace-nowrap">${value ? formatPct(value.percentage) : '—'}</td>`;
-                }).join('');
-
-                const carCells = TEMPORAL_YEARS.map(year => {
-                    const value = row.carValues[year];
-                    return `<td class="px-4 py-2 text-right whitespace-nowrap text-slate-600">${value ? formatPct(value.percentage) : '—'}</td>`;
-                }).join('');
-
-                const evoPoints = formatSigned(row.pointEvolution, ' pts');
-                const evoRel = formatSigned(row.relativeEvolution, ' %');
-                const evoClass = row.pointEvolution > 0 ? 'text-emerald-700' : row.pointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
-
-                const carEvoPoints = formatSigned(row.carPointEvolution, ' pts');
-                const carEvoRel = formatSigned(row.carRelativeEvolution, ' %');
-                const carEvoClass = row.carPointEvolution > 0 ? 'text-emerald-700' : row.carPointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
-
-                const carSubRow = temporal.hasCarByWorkArea ? `
-                    <tr class="bg-slate-50/70 border-t border-slate-100">
-                        <td class="px-4 py-2 pl-8 text-slate-600">↳ Voiture uniquement</td>
-                        <td class="px-4 py-2 text-xs text-slate-500">Part modale voiture</td>
-                        ${carCells}
-                        <td class="px-4 py-2 text-right font-semibold whitespace-nowrap ${carEvoClass}">${carEvoPoints}</td>
-                        <td class="px-4 py-2 text-right whitespace-nowrap ${carEvoClass}">${carEvoRel}</td>
-                    </tr>
-                ` : '';
-
-                return `
-                    <tr class="border-t border-slate-100">
-                        <td class="px-4 py-3 font-medium text-slate-800">${escapeHTML(row.label)}</td>
-                        <td class="px-4 py-3 text-xs text-slate-500">Part du lieu de travail</td>
-                        ${cells}
-                        <td class="px-4 py-3 text-right font-semibold whitespace-nowrap ${evoClass}">${evoPoints}</td>
-                        <td class="px-4 py-3 text-right whitespace-nowrap ${evoClass}">${evoRel}</td>
-                    </tr>
-                    ${carSubRow}
-                `;
-            }).join('');
-
-            const carNote = temporal.hasCarByWorkArea
-                ? `La ligne grisée sous chaque catégorie compare seulement la part de la voiture dans cette catégorie.`
-                : `La base chargée ne contient pas le croisement WORK_AREA × TRANS : la voiture par lieu de travail est donc indisponible. La ligne bleue donne seulement la part modale voiture tous lieux confondus.`;
-
-            return `
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
-                    <div class="p-6 md:p-8 border-b border-slate-100">
-                        <h3 class="text-xl font-bold text-slate-900 mb-2">Analyse temporelle des lieux de travail</h3>
-                        <p class="text-sm text-slate-500 mb-3">
-                            Pour chaque lieu de travail, la première ligne compare son poids dans le total des actifs occupés résidents. ${carNote}
-                        </p>
-                        <div class="flex flex-wrap gap-2">${totalsHTML}</div>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-                                <tr>
-                                    <th class="px-4 py-3 text-left font-semibold">WORK_AREA</th>
-                                    <th class="px-4 py-3 text-left font-semibold">Indicateur</th>
-                                    <th class="px-4 py-3 text-right font-semibold">2011</th>
-                                    <th class="px-4 py-3 text-right font-semibold">2016</th>
-                                    <th class="px-4 py-3 text-right font-semibold">2022</th>
-                                    <th class="px-4 py-3 text-right font-semibold">Évol. 2011→2022</th>
-                                    <th class="px-4 py-3 text-right font-semibold">Var. relative</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${globalCarRow}
-                                ${rowsHTML}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500">
-                        Exemple de lecture : pour une ligne principale, +3,0 pts signifie que la part de ce lieu de travail a augmenté de 3 points. Pour la ligne bleue, cela signifie que la part modale voiture globale a évolué de ce nombre de points.
-                    </div>
-                </div>
-            `;
-        }
-
-
-        function renderResults(data, temporal, resolved, year, transportByWorkArea, hasCrossTransport) {
-            const detailsHTML = renderMainChart(data, transportByWorkArea, hasCrossTransport);
-            const transportHTML = renderGlobalTransportCard(transportByWorkArea, hasCrossTransport);
-            const gapHTML = '';
-
-            const mainHTML = `
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
-                    <div class="p-6 md:p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                        <div>
-                            <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-500"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-                                Résultats pour ${escapeHTML(resolved.label || resolved.code)}
-                            </h2>
-                            <div class="mt-2 flex flex-wrap gap-2">
-                                <span class="inline-block text-xs font-medium bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Millésime ${year}</span>
-                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">GEO_OBJECT = ${resolved.geoObject}</span>
-                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">GEO = ${escapeHTML(resolved.code)}</span>
-                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">TRANS = _T</span>
-                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">AGE = Y_GE15</span>
-                            </div>
-                        </div>
-                        <div class="text-right shrink-0">
-                            <p class="text-sm text-slate-500 font-medium uppercase tracking-wider">Total officiel</p>
-                            <p class="text-2xl font-bold text-blue-600">${formatNumber(data.total)}</p>
-                        </div>
-                    </div>
-                    <div class="p-6 md:p-8 space-y-6">
-                        ${detailsHTML}
-                    </div>
-                    <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500">
-                        <div class="flex items-center gap-2 justify-center text-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 shrink-0"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                            <span>Filtres : FREQ=A, ${measureColumn}=POP, AGE=Y_GE15, EMPSTA_ENQ=1, TRANS=_T, WORK_AREA détaillé. Le total affiché vient de WORK_AREA=_T.</span>
-                        </div>
-                        ${gapHTML}
-                    </div>
-                </div>
-            `;
-
-            resultsContainer.innerHTML = mainHTML + transportHTML + renderTemporalTable(temporal);
-
-            setTimeout(() => {
-                resultsContainer.querySelectorAll('.progress-bar').forEach(bar => {
-                    bar.style.width = bar.getAttribute('data-target');
-                });
-            }, 50);
-
-            attachDonutHoverHandlers();
-        }
-
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-            if (e.dataTransfer.files.length) loadDatabaseFromFile(e.dataTransfer.files[0]);
-        });
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length) loadDatabaseFromFile(e.target.files[0]);
-        });
-
-        async function loadDatabaseFromFile(file) {
-            dbStatus.classList.remove('hidden');
-            dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800';
-            dbStatus.innerHTML = `
-                <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                Chargement de la base en cours...
-            `;
-            dropZone.style.display = 'none';
-            showError('');
-            showResolvedInfo(null);
-            resultsContainer.innerHTML = '';
-
-            try {
-                const config = { locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${filename}` };
-                const SQL = await initSqlJs(config);
-                const arrayBuffer = await file.arrayBuffer();
-                db = new SQL.Database(new Uint8Array(arrayBuffer));
-
-                const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='navettes'");
-                if (!tables.length || !tables[0].values.length) {
-                    throw new Error("La base ne contient pas de table nommée 'navettes'.");
-                }
-
-                const pragma = db.exec('PRAGMA table_info(navettes)');
-                tableColumns = pragma.length ? pragma[0].values.map(row => row[1]) : [];
-                measureColumn = getMeasureColumn();
-
-                const mustHave = ['GEO', 'GEO_OBJECT', 'TIME_PERIOD', 'AGE', 'EMPSTA_ENQ', 'TRANS', 'WORK_AREA', 'OBS_VALUE'];
-                const missing = mustHave.filter(col => !hasColumn(col));
-                if (missing.length) {
-                    throw new Error(`Colonnes manquantes dans la table navettes : ${missing.join(', ')}`);
-                }
-
-                dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800';
-                dbStatus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Base chargée : ${escapeHTML(file.name)}`;
-
-                input.disabled = false;
-                geoObjectSelect.disabled = false;
-                input.focus();
-                updateSubmitState();
-            } catch (err) {
-                console.error(err);
-                db = null;
-                tableColumns = [];
-                measureColumn = null;
-                currentTransportByWorkArea = {};
-                input.disabled = true;
-                geoObjectSelect.disabled = true;
-                updateSubmitState();
-                dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
-                dbStatus.innerHTML = 'Échec du chargement du fichier.';
-                showError(err.message || "Le fichier fourni n'a pas pu être lu comme une base SQLite valide.");
-                dropZone.style.display = 'block';
-            }
-        }
-
-        input.addEventListener('input', updateSubmitState);
-        geoObjectSelect.addEventListener('change', updateSubmitState);
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!db) return;
-
-            const rawInput = input.value.trim();
-            if (!rawInput) return;
-
-            showError('');
-            showResolvedInfo(null);
-            resultsContainer.innerHTML = '';
-            setBusy(true, 'Recherche...');
-
-            try {
-                const resolved = await resolveGeoInput(rawInput);
-                if (!resolved?.code || !resolved?.geoObject) {
-                    throw new Error('Impossible de résoudre ce territoire.');
-                }
-
-                showResolvedInfo(resolved);
-                setBusy(true, 'Calcul...');
-
-                const latestYear = getLatestYear(resolved.code, resolved.geoObject);
-                if (!latestYear) {
-                    const availableGeoObjects = getDistinctValues('GEO_OBJECT', resolved.code).join(', ') || 'aucun';
-                    const availableTrans = getDistinctValues('TRANS', resolved.code).join(', ') || 'aucun';
-                    throw new Error(
-                        `Aucune ligne totalisée trouvée pour ${resolved.code} avec GEO_OBJECT=${resolved.geoObject}, AGE=Y_GE15, EMPSTA_ENQ=1, TRANS=_T et ${measureColumn}=POP. ` +
-                        `Valeurs disponibles pour ce GEO — GEO_OBJECT : ${availableGeoObjects} ; TRANS : ${availableTrans}.`
-                    );
-                }
-
-                const officialTotal = getOfficialTotal(resolved.code, resolved.geoObject, latestYear);
-                if (officialTotal === null || Number.isNaN(officialTotal)) {
-                    throw new Error(`La ligne officielle WORK_AREA=_T est introuvable pour ${resolved.code} en ${latestYear}.`);
-                }
-
-                const details = getWorkAreaDetails(resolved.code, resolved.geoObject, latestYear)
-                    .map(item => ({
-                        ...item,
-                        percentage: officialTotal > 0 ? (item.value / officialTotal) * 100 : 0
-                    }))
-                    .sort((a, b) => b.value - a.value);
-
-                const hasCrossTransport = hasDetailedTransportByWorkArea(resolved.code, resolved.geoObject, latestYear);
-                const transportCodes = new Set(['_T']);
-                if (hasCrossTransport) {
-                    details.forEach(item => transportCodes.add(item.code));
-                    transportCodes.add('20_30');
-                    transportCodes.add('10');
-                    STACK_CHILD_WORK_AREAS.forEach(code => transportCodes.add(code));
-                }
-
-                const transportByWorkArea = getTransportDistributions(resolved.code, resolved.geoObject, latestYear, Array.from(transportCodes));
-                const temporal = getTemporalAnalysis(resolved.code, resolved.geoObject);
-                renderResults({ total: officialTotal, details }, temporal, resolved, latestYear, transportByWorkArea, hasCrossTransport);
-            } catch (err) {
-                console.error(err);
-                showError(err.message || 'Erreur inconnue.');
-            } finally {
-                setBusy(false);
-                updateSubmitState();
-            }
-        });
-    </script>
+window.showDonutTooltip = showDonutTooltip;
+window.moveDonutTooltip = moveDonutTooltip;
+window.hideDonutTooltip = hideDonutTooltip;
+</script>
 </body>
 </html>
