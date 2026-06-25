@@ -10,6 +10,11 @@
         .fade-in { animation: fadeIn 0.5s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .progress-bar { transition: width 1s ease-out; }
+        .modal-hover-zone { cursor: help; }
+        .modal-hover-zone:hover { filter: brightness(0.97); }
+        .donut-tooltip { max-width: min(360px, calc(100vw - 32px)); }
+        .donut-chart { width: 112px; height: 112px; border-radius: 9999px; display: grid; place-items: center; }
+        .donut-hole { width: 62px; height: 62px; border-radius: 9999px; background: white; display: flex; align-items: center; justify-content: center; text-align: center; }
     </style>
 </head>
 <body class="bg-slate-50 font-sans text-slate-800 min-h-screen p-4 md:p-8">
@@ -81,6 +86,40 @@
     <script>
         const GEO_API_BASE = 'https://geo.api.gouv.fr';
         const TEMPORAL_YEARS = ['2011', '2016', '2022'];
+        const STACK_CHILD_WORK_AREAS = ['21', '22', '23', '24T30'];
+        const TRANSPORT_ORDER = ['5', '6', '3', '2', '4', '1'];
+
+        const TRANS_LABELS = {
+            '1': 'Pas de transport',
+            '2': 'Marche à pied',
+            '3': 'Vélo',
+            '4': 'Deux-roues motorisé',
+            '5': 'Voiture, camion ou fourgonnette',
+            '6': 'Transport en commun',
+            '_T': 'Total',
+            'Z': 'Non applicable / Sans objet'
+        };
+
+        const TRANS_COLORS = {
+            '1': '#94a3b8',
+            '2': '#22c55e',
+            '3': '#06b6d4',
+            '4': '#f97316',
+            '5': '#3b82f6',
+            '6': '#8b5cf6',
+            'OTHER': '#cbd5e1'
+        };
+
+        const WORK_AREA_COLORS = {
+            '10': '#2563eb',
+            '1': '#2563eb',
+            '21': '#60a5fa',
+            '22': '#38bdf8',
+            '23': '#818cf8',
+            '24T30': '#a78bfa',
+            '20_30': '#1d4ed8',
+            'OTHER': '#94a3b8'
+        };
 
         // Codes WORK_AREA utilisés dans DS_RP_NAVETTES_PRINC.
         // Je garde aussi les anciens codes 1/2/3/4/5 au cas où une autre version du fichier les contient.
@@ -111,6 +150,7 @@
         let db = null;
         let tableColumns = [];
         let measureColumn = null;
+        let currentTransportByWorkArea = {};
 
         const form = document.getElementById('searchForm');
         const input = document.getElementById('inseeInput');
@@ -219,15 +259,18 @@
             throw new Error('Impossible de trouver la colonne de mesure : RP_MEASURE ou MEASURE.');
         }
 
-        function buildBaseWhere(prefix = '') {
+        function buildBaseWhere(prefix = '', includeTrans = true) {
             const p = prefix;
             const clauses = [
                 `${requiredColumn('GEO')} = :${p}geo`,
                 `${requiredColumn('GEO_OBJECT')} = :${p}geoObject`,
                 `${requiredColumn('AGE')} = :${p}age`,
-                `${requiredColumn('EMPSTA_ENQ')} = :${p}empsta`,
-                `${requiredColumn('TRANS')} = :${p}trans`
+                `${requiredColumn('EMPSTA_ENQ')} = :${p}empsta`
             ];
+
+            if (includeTrans) {
+                clauses.push(`${requiredColumn('TRANS')} = :${p}trans`);
+            }
 
             if (hasColumn('FREQ')) {
                 clauses.push(`${quoteIdent('FREQ')} = :${p}freq`);
@@ -240,14 +283,14 @@
             return clauses.join('\n                      AND ');
         }
 
-        function baseParams(code, geoObject, prefix = '') {
+        function baseParams(code, geoObject, prefix = '', trans = '_T') {
             const p = prefix;
             const params = {};
             params[`:${p}geo`] = code;
             params[`:${p}geoObject`] = geoObject;
             params[`:${p}age`] = 'Y_GE15';
             params[`:${p}empsta`] = '1';
-            params[`:${p}trans`] = '_T';
+            params[`:${p}trans`] = trans;
             if (hasColumn('FREQ')) params[`:${p}freq`] = 'A';
             if (measureColumn) params[`:${p}measure`] = 'POP';
             return params;
@@ -309,6 +352,35 @@
             return row ? Number(row.total) : null;
         }
 
+        function getTotalForTrans(code, geoObject, year, transCode) {
+            const sql = `
+                SELECT ${requiredColumn('OBS_VALUE')} AS total
+                FROM navettes
+                WHERE ${buildBaseWhere()}
+                  AND ${requiredColumn('TIME_PERIOD')} = :year
+                  AND ${requiredColumn('WORK_AREA')} = :workArea
+                LIMIT 1
+            `;
+            const params = { ...baseParams(code, geoObject, '', transCode), ':year': String(year), ':workArea': '_T' };
+            const row = queryOne(sql, params);
+            return row ? Number(row.total) : null;
+        }
+
+        function hasDetailedTransportByWorkArea(code, geoObject, year) {
+            const sql = `
+                SELECT COUNT(*) AS n
+                FROM navettes
+                WHERE ${buildBaseWhere('', false)}
+                  AND ${requiredColumn('TIME_PERIOD')} = :year
+                  AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
+                  AND ${requiredColumn('TRANS')} NOT IN ('_T', 'Z')
+            `;
+            const params = { ...baseParams(code, geoObject), ':year': String(year) };
+            delete params[':trans'];
+            const row = queryOne(sql, params);
+            return Number(row?.n || 0) > 0;
+        }
+
         function getWorkAreaDetails(code, geoObject, year) {
             const sql = `
                 SELECT ${requiredColumn('WORK_AREA')} AS work_area,
@@ -327,6 +399,67 @@
             }));
         }
 
+        function getWorkAreaDetailsForTrans(code, geoObject, year, transCode) {
+            const sql = `
+                SELECT ${requiredColumn('WORK_AREA')} AS work_area,
+                       ${requiredColumn('OBS_VALUE')} AS value
+                FROM navettes
+                WHERE ${buildBaseWhere()}
+                  AND ${requiredColumn('TIME_PERIOD')} = :year
+                  AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
+                ORDER BY ${requiredColumn('OBS_VALUE')} DESC
+            `;
+            const params = { ...baseParams(code, geoObject, '', transCode), ':year': String(year) };
+            return queryAll(sql, params).map(row => ({
+                code: String(row.work_area),
+                label: WORK_AREA_LABELS[String(row.work_area)] || `Code inconnu (${row.work_area})`,
+                value: Number(row.value)
+            }));
+        }
+
+        function getTransportDistribution(code, geoObject, year, workAreaCode) {
+            const sql = `
+                SELECT ${requiredColumn('TRANS')} AS trans,
+                       ${requiredColumn('OBS_VALUE')} AS value
+                FROM navettes
+                WHERE ${buildBaseWhere('', false)}
+                  AND ${requiredColumn('TIME_PERIOD')} = :year
+                  AND ${requiredColumn('WORK_AREA')} = :workArea
+                  AND ${requiredColumn('TRANS')} NOT IN ('_T', 'Z')
+            `;
+            const params = { ...baseParams(code, geoObject), ':year': String(year), ':workArea': String(workAreaCode) };
+            delete params[':trans'];
+            const rawRows = queryAll(sql, params).map(row => ({
+                code: String(row.trans),
+                label: TRANS_LABELS[String(row.trans)] || `Code transport inconnu (${row.trans})`,
+                value: Number(row.value),
+                color: TRANS_COLORS[String(row.trans)] || TRANS_COLORS.OTHER
+            }));
+
+            const orderIndex = code => {
+                const idx = TRANSPORT_ORDER.indexOf(code);
+                return idx === -1 ? 999 : idx;
+            };
+
+            const rows = rawRows
+                .filter(row => row.value > 0)
+                .sort((a, b) => orderIndex(a.code) - orderIndex(b.code));
+
+            const total = rows.reduce((acc, row) => acc + row.value, 0);
+            return rows.map(row => ({
+                ...row,
+                percentage: total > 0 ? (row.value / total) * 100 : 0
+            }));
+        }
+
+        function getTransportDistributions(code, geoObject, year, workAreaCodes) {
+            const distributions = {};
+            Array.from(new Set(workAreaCodes.filter(Boolean))).forEach(workAreaCode => {
+                distributions[workAreaCode] = getTransportDistribution(code, geoObject, year, workAreaCode);
+            });
+            return distributions;
+        }
+
         function getTemporalAnalysis(code, geoObject) {
             const dataByYear = {};
             const workAreaCodes = new Set();
@@ -336,23 +469,47 @@
                 if (total === null || Number.isNaN(total) || total <= 0) return;
 
                 const details = getWorkAreaDetails(code, geoObject, year);
-                const detailsByCode = {};
+                const carDetails = getWorkAreaDetailsForTrans(code, geoObject, year, '5');
+                const carByCode = {};
+                carDetails.forEach(item => {
+                    carByCode[item.code] = item;
+                });
 
+                const globalCarValue = getTotalForTrans(code, geoObject, year, '5');
+                const globalCar = globalCarValue !== null && !Number.isNaN(globalCarValue)
+                    ? {
+                        value: globalCarValue,
+                        percentage: (globalCarValue / total) * 100
+                    }
+                    : null;
+
+                const detailsByCode = {};
                 details.forEach(item => {
                     workAreaCodes.add(item.code);
+                    const carValue = carByCode[item.code]?.value ?? null;
                     detailsByCode[item.code] = {
                         ...item,
-                        percentage: (item.value / total) * 100
+                        percentage: (item.value / total) * 100,
+                        carValue,
+                        carPercentage: carValue !== null && item.value > 0 ? (carValue / item.value) * 100 : null
                     };
                 });
 
-                dataByYear[year] = { total, detailsByCode };
+                dataByYear[year] = { total, detailsByCode, globalCar };
             });
 
             const rows = Array.from(workAreaCodes).map(codeWA => {
                 const values = {};
+                const carValues = {};
                 TEMPORAL_YEARS.forEach(year => {
-                    values[year] = dataByYear[year]?.detailsByCode?.[codeWA] || null;
+                    const yearValue = dataByYear[year]?.detailsByCode?.[codeWA] || null;
+                    values[year] = yearValue;
+                    carValues[year] = yearValue && yearValue.carPercentage !== null
+                        ? {
+                            value: yearValue.carValue,
+                            percentage: yearValue.carPercentage
+                        }
+                        : null;
                 });
 
                 const first = values['2011'];
@@ -362,18 +519,53 @@
                     ? ((last.percentage - first.percentage) / first.percentage) * 100
                     : null;
 
+                const firstCar = carValues['2011'];
+                const lastCar = carValues['2022'];
+                const carPointEvolution = firstCar && lastCar ? lastCar.percentage - firstCar.percentage : null;
+                const carRelativeEvolution = firstCar && lastCar && firstCar.percentage !== 0
+                    ? ((lastCar.percentage - firstCar.percentage) / firstCar.percentage) * 100
+                    : null;
+
                 return {
                     code: codeWA,
                     label: WORK_AREA_LABELS[codeWA] || `Code inconnu (${codeWA})`,
                     values,
+                    carValues,
                     pointEvolution,
                     relativeEvolution,
+                    carPointEvolution,
+                    carRelativeEvolution,
                     sortValue: last?.percentage ?? values['2016']?.percentage ?? first?.percentage ?? 0
                 };
             }).sort((a, b) => b.sortValue - a.sortValue);
 
-            return { dataByYear, rows };
+            const hasCarByWorkArea = rows.some(row =>
+                TEMPORAL_YEARS.some(year => row.carValues[year]?.percentage !== null && row.carValues[year]?.percentage !== undefined)
+            );
+
+            const globalCarValues = {};
+            TEMPORAL_YEARS.forEach(year => {
+                globalCarValues[year] = dataByYear[year]?.globalCar || null;
+            });
+            const firstGlobalCar = globalCarValues['2011'];
+            const lastGlobalCar = globalCarValues['2022'];
+            const globalCarPointEvolution = firstGlobalCar && lastGlobalCar ? lastGlobalCar.percentage - firstGlobalCar.percentage : null;
+            const globalCarRelativeEvolution = firstGlobalCar && lastGlobalCar && firstGlobalCar.percentage !== 0
+                ? ((lastGlobalCar.percentage - firstGlobalCar.percentage) / firstGlobalCar.percentage) * 100
+                : null;
+
+            return {
+                dataByYear,
+                rows,
+                hasCarByWorkArea,
+                globalCar: {
+                    values: globalCarValues,
+                    pointEvolution: globalCarPointEvolution,
+                    relativeEvolution: globalCarRelativeEvolution
+                }
+            };
         }
+
 
         async function fetchJson(url) {
             const response = await fetch(url);
@@ -572,25 +764,245 @@
             return `${sign}${value.toFixed(1)}${suffix}`;
         }
 
-        function renderMainTable(data) {
+        function buildWorkAreaLookup(details) {
+            return Object.fromEntries(details.map(item => [item.code, item]));
+        }
+
+        function workAreaValue(byCode, code) {
+            return byCode[code]?.value ?? 0;
+        }
+
+        function workAreaPercentage(item, total) {
+            return item && total > 0 ? (item.value / total) * 100 : 0;
+        }
+
+        function segmentStyle(code, value, denominator) {
+            const width = denominator > 0 ? Math.max(0, Math.min(100, (value / denominator) * 100)) : 0;
+            const color = WORK_AREA_COLORS[code] || WORK_AREA_COLORS.OTHER;
+            return `width:${width}%;background:${color};`;
+        }
+
+        function renderTransportHint(code, hasCrossTransport) {
+            if (!hasCrossTransport) {
+                return `<span class="text-xs text-amber-600">croisement transport × lieu absent dans cette base</span>`;
+            }
+            const hasDistribution = currentTransportByWorkArea[code]?.length > 0;
+            return hasDistribution
+                ? `<span class="text-xs text-slate-400">survol : parts modales</span>`
+                : `<span class="text-xs text-amber-600">parts modales indisponibles</span>`;
+        }
+
+        function renderMainChart(data, transportByWorkArea, hasCrossTransport) {
+            currentTransportByWorkArea = transportByWorkArea || {};
+            const hoverZoneClass = hasCrossTransport ? 'modal-hover-zone' : '';
+
             if (data.details.length === 0) {
                 return `<p class="text-slate-500 text-center py-4">Le total existe, mais aucun détail WORK_AREA n'a été trouvé pour ces filtres.</p>`;
             }
 
-            return data.details.map(item => `
-                <div class="space-y-2">
+            const byCode = buildWorkAreaLookup(data.details);
+            const same = byCode['10'] || byCode['1'] || null;
+            const parent = byCode['20_30'] || {
+                code: '20_30',
+                label: WORK_AREA_LABELS['20_30'],
+                value: STACK_CHILD_WORK_AREAS.reduce((acc, code) => acc + workAreaValue(byCode, code), 0)
+            };
+            const childItems = STACK_CHILD_WORK_AREAS
+                .map(code => byCode[code])
+                .filter(Boolean);
+            const childSum = childItems.reduce((acc, item) => acc + item.value, 0);
+            const parentPct = workAreaPercentage(parent, data.total);
+            const samePct = workAreaPercentage(same, data.total);
+            const denominator = parent.value > 0 ? parent.value : childSum;
+            const residual = Math.max(0, denominator - childSum);
+
+            const sameHTML = same ? `
+                <div class="space-y-2 ${hoverZoneClass} rounded-xl p-3 -mx-3" data-work-area="${same.code}" data-work-area-label="${escapeHTML(same.label)}">
                     <div class="flex justify-between items-end gap-4">
-                        <span class="font-medium text-slate-700">${escapeHTML(item.label)}</span>
+                        <div>
+                            <span class="font-semibold text-slate-800">${escapeHTML(same.label)}</span>
+                            <div>${renderTransportHint(same.code, hasCrossTransport)}</div>
+                        </div>
                         <div class="text-right whitespace-nowrap">
-                            <span class="text-lg font-bold text-slate-900">${item.percentage.toFixed(1)}%</span>
-                            <span class="text-sm text-slate-500 ml-2">(${formatNumber(item.value)})</span>
+                            <span class="text-lg font-bold text-slate-900">${samePct.toFixed(1)}%</span>
+                            <span class="text-sm text-slate-500 ml-2">(${formatNumber(same.value)})</span>
                         </div>
                     </div>
-                    <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                        <div class="bg-blue-500 h-full rounded-full progress-bar" style="width: 0%;" data-target="${Math.min(item.percentage, 100)}%"></div>
+                    <div class="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
+                        <div class="h-full rounded-full progress-bar" style="width: 0%; background:${WORK_AREA_COLORS[same.code] || WORK_AREA_COLORS.OTHER};" data-target="${Math.min(samePct, 100)}%"></div>
                     </div>
                 </div>
+            ` : '';
+
+            const segmentsHTML = childItems.map(item => {
+                const childPctOfParent = denominator > 0 ? (item.value / denominator) * 100 : 0;
+                const childPctOfTotal = data.total > 0 ? (item.value / data.total) * 100 : 0;
+                return `
+                    <div class="${hoverZoneClass} h-full flex items-center justify-center text-[11px] font-semibold text-white/95 truncate px-1 transition-all" data-work-area="${item.code}" data-work-area-label="${escapeHTML(item.label)}" title="${escapeHTML(item.label)} — ${childPctOfTotal.toFixed(1)} % du total, ${childPctOfParent.toFixed(1)} % des travailleurs dans une autre commune" style="${segmentStyle(item.code, item.value, denominator)}">
+                        ${childPctOfParent >= 12 ? escapeHTML(item.label.replace('Autre ', '')) : ''}
+                    </div>
+                `;
+            }).join('');
+
+            const residualHTML = residual > 1 ? `
+                <div class="h-full flex items-center justify-center text-[11px] font-semibold text-slate-500 bg-slate-200 truncate px-1" title="Écart entre 20_30 et la somme des sous-catégories" style="width:${(residual / denominator) * 100}%">
+                    Écart
+                </div>
+            ` : '';
+
+            const legendHTML = childItems.map(item => `
+                <div class="flex items-center gap-2 text-xs text-slate-600">
+                    <span class="w-3 h-3 rounded-sm" style="background:${WORK_AREA_COLORS[item.code] || WORK_AREA_COLORS.OTHER}"></span>
+                    <span>${escapeHTML(item.label)}</span>
+                </div>
             `).join('');
+
+            const parentNote = childSum > 0 && Math.abs(parent.value - childSum) > 1
+                ? `<p class="text-xs text-amber-700 mt-2">Attention : 20_30 vaut ${formatNumber(parent.value)} alors que la somme des sous-catégories visibles vaut ${formatNumber(childSum)}. La zone grise signale l'écart éventuel.</p>`
+                : '';
+
+            return `
+                <div id="mainChart" class="relative space-y-7">
+                    <div id="donutTooltip" class="donut-tooltip hidden fixed z-50 pointer-events-none bg-white border border-slate-200 shadow-xl rounded-2xl p-4 text-sm"></div>
+
+                    ${sameHTML}
+
+                    <div class="space-y-3 rounded-xl p-3 -mx-3">
+                        <div class="flex justify-between items-start gap-4 ${hoverZoneClass} rounded-lg p-2 -mx-2" data-work-area="20_30" data-work-area-label="${escapeHTML(parent.label)}">
+                            <div>
+                                <span class="font-semibold text-slate-800">${escapeHTML(parent.label)}</span>
+                                <p class="text-xs text-slate-500 max-w-2xl">Barre globale épaisse, composée par les sous-catégories plus précises.</p>
+                                <div>${renderTransportHint('20_30', hasCrossTransport)}</div>
+                            </div>
+                            <div class="text-right whitespace-nowrap">
+                                <span class="text-lg font-bold text-slate-900">${parentPct.toFixed(1)}%</span>
+                                <span class="text-sm text-slate-500 ml-2">(${formatNumber(parent.value)})</span>
+                            </div>
+                        </div>
+
+                        <div class="w-full bg-slate-100 rounded-2xl h-12 overflow-hidden">
+                            <div class="h-full rounded-2xl overflow-hidden progress-bar" style="width: 0%;" data-target="${Math.min(parentPct, 100)}%">
+                                <div class="flex h-full w-full">
+                                    ${segmentsHTML}
+                                    ${residualHTML}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid sm:grid-cols-2 gap-x-5 gap-y-2 mt-3">${legendHTML}</div>
+                        ${parentNote}
+                    </div>
+
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-900">
+                        Le gros bloc « Dans une autre commune » évite de compter deux fois les sous-catégories 21, 22, 23 et 24T30. Les parts modales par lieu ne s'affichent que si la base contient le croisement WORK_AREA × TRANS.
+                    </div>
+                </div>
+            `;
+        }
+
+        function buildDonutHTML(workAreaCode, label) {
+            const rows = currentTransportByWorkArea[workAreaCode] || [];
+            if (!rows.length) {
+                return `
+                    <div class="font-semibold text-slate-900 mb-1">${escapeHTML(label)}</div>
+                    <p class="text-slate-500">Aucune ventilation par mode de transport trouvée pour cette catégorie.</p>
+                `;
+            }
+
+            let start = 0;
+            const gradientParts = rows.map(row => {
+                const end = start + row.percentage * 3.6;
+                const part = `${row.color} ${start.toFixed(3)}deg ${end.toFixed(3)}deg`;
+                start = end;
+                return part;
+            });
+            if (gradientParts.length === 1) gradientParts.push(`${rows[0].color} ${start.toFixed(3)}deg 360deg`);
+
+            const total = rows.reduce((acc, row) => acc + row.value, 0);
+            const legend = rows.map(row => `
+                <div class="flex items-center justify-between gap-3 text-xs">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${row.color}"></span>
+                        <span class="truncate">${escapeHTML(row.label)}</span>
+                    </div>
+                    <div class="font-semibold text-slate-800 whitespace-nowrap">${row.percentage.toFixed(1)} %</div>
+                </div>
+            `).join('');
+
+            return `
+                <div class="font-semibold text-slate-900 mb-1">${escapeHTML(label)}</div>
+                <div class="text-xs text-slate-500 mb-3">Répartition modale — ${formatNumber(total)} actifs</div>
+                <div class="flex gap-4 items-center">
+                    <div class="donut-chart shrink-0" style="background: conic-gradient(${gradientParts.join(', ')});">
+                        <div class="donut-hole">
+                            <div>
+                                <div class="text-[11px] text-slate-500">Total</div>
+                                <div class="text-sm font-bold text-slate-900">${formatNumber(total)}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="min-w-0 flex-1 space-y-1.5">${legend}</div>
+                </div>
+            `;
+        }
+
+        function renderGlobalTransportCard(transportByWorkArea, hasCrossTransport) {
+            currentTransportByWorkArea = transportByWorkArea || currentTransportByWorkArea || {};
+            const rows = currentTransportByWorkArea['_T'] || [];
+            if (!rows.length) return '';
+
+            const note = hasCrossTransport
+                ? `La base contient aussi un croisement WORK_AREA × TRANS : les donuts par catégorie peuvent apparaître au survol des barres.`
+                : `Cette base ne contient pas le croisement WORK_AREA × TRANS : on peut afficher la répartition modale globale, mais pas la répartition modale de chaque lieu de travail.`;
+
+            return `
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+                    <div class="p-6 md:p-8 border-b border-slate-100">
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Répartition modale globale</h3>
+                        <p class="text-sm text-slate-500">${note}</p>
+                    </div>
+                    <div class="p-6 md:p-8">
+                        <div class="max-w-2xl">
+                            ${buildDonutHTML('_T', 'Tous lieux de travail confondus')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function attachDonutHoverHandlers() {
+            const chart = document.getElementById('mainChart');
+            const tooltip = document.getElementById('donutTooltip');
+            if (!chart || !tooltip) return;
+
+            function placeTooltip(event) {
+                const padding = 14;
+                const rect = tooltip.getBoundingClientRect();
+                let left = event.clientX + padding;
+                let top = event.clientY + padding;
+                if (left + rect.width > window.innerWidth - 8) left = event.clientX - rect.width - padding;
+                if (top + rect.height > window.innerHeight - 8) top = window.innerHeight - rect.height - 8;
+                tooltip.style.left = `${Math.max(8, left)}px`;
+                tooltip.style.top = `${Math.max(8, top)}px`;
+            }
+
+            function showForZone(zone, event) {
+                const workAreaCode = zone.dataset.workArea;
+                const label = zone.dataset.workAreaLabel || WORK_AREA_LABELS[workAreaCode] || workAreaCode;
+                tooltip.innerHTML = buildDonutHTML(workAreaCode, label);
+                tooltip.classList.remove('hidden');
+                placeTooltip(event);
+            }
+
+            chart.addEventListener('mousemove', event => {
+                const zone = event.target.closest('.modal-hover-zone');
+                if (!zone || !chart.contains(zone)) {
+                    tooltip.classList.add('hidden');
+                    return;
+                }
+                showForZone(zone, event);
+            });
+
+            chart.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
         }
 
         function renderTemporalTable(temporal) {
@@ -613,32 +1025,73 @@
                 return `<span class="inline-block text-xs font-medium ${labelClass} px-2 py-1 rounded-full">${year} : ${yearData ? formatNumber(yearData.total) : 'absent'}</span>`;
             }).join('');
 
+            const carGlobalCells = TEMPORAL_YEARS.map(year => {
+                const value = temporal.globalCar?.values?.[year];
+                return `<td class="px-4 py-3 text-right whitespace-nowrap">${value ? formatPct(value.percentage) : '—'}</td>`;
+            }).join('');
+
+            const carGlobalEvoClass = temporal.globalCar?.pointEvolution > 0 ? 'text-emerald-700' : temporal.globalCar?.pointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
+            const globalCarRow = `
+                <tr class="border-t border-slate-100 bg-blue-50/50">
+                    <td class="px-4 py-3 font-semibold text-blue-900">Voiture — ensemble des actifs</td>
+                    <td class="px-4 py-3 text-xs text-blue-800">Part modale globale</td>
+                    ${carGlobalCells}
+                    <td class="px-4 py-3 text-right font-semibold whitespace-nowrap ${carGlobalEvoClass}">${formatSigned(temporal.globalCar?.pointEvolution, ' pts')}</td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap ${carGlobalEvoClass}">${formatSigned(temporal.globalCar?.relativeEvolution, ' %')}</td>
+                </tr>
+            `;
+
             const rowsHTML = temporal.rows.map(row => {
                 const cells = TEMPORAL_YEARS.map(year => {
                     const value = row.values[year];
                     return `<td class="px-4 py-3 text-right whitespace-nowrap">${value ? formatPct(value.percentage) : '—'}</td>`;
                 }).join('');
 
+                const carCells = TEMPORAL_YEARS.map(year => {
+                    const value = row.carValues[year];
+                    return `<td class="px-4 py-2 text-right whitespace-nowrap text-slate-600">${value ? formatPct(value.percentage) : '—'}</td>`;
+                }).join('');
+
                 const evoPoints = formatSigned(row.pointEvolution, ' pts');
                 const evoRel = formatSigned(row.relativeEvolution, ' %');
                 const evoClass = row.pointEvolution > 0 ? 'text-emerald-700' : row.pointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
 
+                const carEvoPoints = formatSigned(row.carPointEvolution, ' pts');
+                const carEvoRel = formatSigned(row.carRelativeEvolution, ' %');
+                const carEvoClass = row.carPointEvolution > 0 ? 'text-emerald-700' : row.carPointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
+
+                const carSubRow = temporal.hasCarByWorkArea ? `
+                    <tr class="bg-slate-50/70 border-t border-slate-100">
+                        <td class="px-4 py-2 pl-8 text-slate-600">↳ Voiture uniquement</td>
+                        <td class="px-4 py-2 text-xs text-slate-500">Part modale voiture</td>
+                        ${carCells}
+                        <td class="px-4 py-2 text-right font-semibold whitespace-nowrap ${carEvoClass}">${carEvoPoints}</td>
+                        <td class="px-4 py-2 text-right whitespace-nowrap ${carEvoClass}">${carEvoRel}</td>
+                    </tr>
+                ` : '';
+
                 return `
                     <tr class="border-t border-slate-100">
                         <td class="px-4 py-3 font-medium text-slate-800">${escapeHTML(row.label)}</td>
+                        <td class="px-4 py-3 text-xs text-slate-500">Part du lieu de travail</td>
                         ${cells}
                         <td class="px-4 py-3 text-right font-semibold whitespace-nowrap ${evoClass}">${evoPoints}</td>
                         <td class="px-4 py-3 text-right whitespace-nowrap ${evoClass}">${evoRel}</td>
                     </tr>
+                    ${carSubRow}
                 `;
             }).join('');
+
+            const carNote = temporal.hasCarByWorkArea
+                ? `La ligne grisée sous chaque catégorie compare seulement la part de la voiture dans cette catégorie.`
+                : `La base chargée ne contient pas le croisement WORK_AREA × TRANS : la voiture par lieu de travail est donc indisponible. La ligne bleue donne seulement la part modale voiture tous lieux confondus.`;
 
             return `
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
                     <div class="p-6 md:p-8 border-b border-slate-100">
                         <h3 class="text-xl font-bold text-slate-900 mb-2">Analyse temporelle des lieux de travail</h3>
                         <p class="text-sm text-slate-500 mb-3">
-                            Comparaison des parts de chaque modalité WORK_AREA dans le total des actifs occupés résidents. L'évolution est calculée entre 2011 et 2022 quand les deux millésimes existent.
+                            Pour chaque lieu de travail, la première ligne compare son poids dans le total des actifs occupés résidents. ${carNote}
                         </p>
                         <div class="flex flex-wrap gap-2">${totalsHTML}</div>
                     </div>
@@ -647,30 +1100,32 @@
                             <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
                                 <tr>
                                     <th class="px-4 py-3 text-left font-semibold">WORK_AREA</th>
-                                    <th class="px-4 py-3 text-right font-semibold">Part 2011</th>
-                                    <th class="px-4 py-3 text-right font-semibold">Part 2016</th>
-                                    <th class="px-4 py-3 text-right font-semibold">Part 2022</th>
+                                    <th class="px-4 py-3 text-left font-semibold">Indicateur</th>
+                                    <th class="px-4 py-3 text-right font-semibold">2011</th>
+                                    <th class="px-4 py-3 text-right font-semibold">2016</th>
+                                    <th class="px-4 py-3 text-right font-semibold">2022</th>
                                     <th class="px-4 py-3 text-right font-semibold">Évol. 2011→2022</th>
                                     <th class="px-4 py-3 text-right font-semibold">Var. relative</th>
                                 </tr>
                             </thead>
-                            <tbody>${rowsHTML}</tbody>
+                            <tbody>
+                                ${globalCarRow}
+                                ${rowsHTML}
+                            </tbody>
                         </table>
                     </div>
                     <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500">
-                        Exemple de lecture : +3,0 pts signifie que la part a augmenté de 3 points de pourcentage. La variation relative compare cette hausse à la part de départ en 2011.
+                        Exemple de lecture : pour une ligne principale, +3,0 pts signifie que la part de ce lieu de travail a augmenté de 3 points. Pour la ligne bleue, cela signifie que la part modale voiture globale a évolué de ce nombre de points.
                     </div>
                 </div>
             `;
         }
 
-        function renderResults(data, temporal, resolved, year) {
-            const detailsHTML = renderMainTable(data);
-            const sumDetails = data.details.reduce((acc, item) => acc + item.value, 0);
-            const gap = data.total - sumDetails;
-            const gapHTML = Math.abs(gap) > 1
-                ? `<p class="mt-2 text-xs text-amber-700">Écart entre le total officiel et la somme des modalités affichées : ${formatNumber(gap)}. C'est possible si certaines modalités sont absentes, secrétisées ou non affichées.</p>`
-                : '';
+
+        function renderResults(data, temporal, resolved, year, transportByWorkArea, hasCrossTransport) {
+            const detailsHTML = renderMainChart(data, transportByWorkArea, hasCrossTransport);
+            const transportHTML = renderGlobalTransportCard(transportByWorkArea, hasCrossTransport);
+            const gapHTML = '';
 
             const mainHTML = `
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
@@ -706,13 +1161,15 @@
                 </div>
             `;
 
-            resultsContainer.innerHTML = mainHTML + renderTemporalTable(temporal);
+            resultsContainer.innerHTML = mainHTML + transportHTML + renderTemporalTable(temporal);
 
             setTimeout(() => {
                 resultsContainer.querySelectorAll('.progress-bar').forEach(bar => {
                     bar.style.width = bar.getAttribute('data-target');
                 });
             }, 50);
+
+            attachDonutHoverHandlers();
         }
 
         dropZone.addEventListener('click', () => fileInput.click());
@@ -778,6 +1235,7 @@
                 db = null;
                 tableColumns = [];
                 measureColumn = null;
+                currentTransportByWorkArea = {};
                 input.disabled = true;
                 geoObjectSelect.disabled = true;
                 updateSubmitState();
@@ -834,8 +1292,18 @@
                     }))
                     .sort((a, b) => b.value - a.value);
 
+                const hasCrossTransport = hasDetailedTransportByWorkArea(resolved.code, resolved.geoObject, latestYear);
+                const transportCodes = new Set(['_T']);
+                if (hasCrossTransport) {
+                    details.forEach(item => transportCodes.add(item.code));
+                    transportCodes.add('20_30');
+                    transportCodes.add('10');
+                    STACK_CHILD_WORK_AREAS.forEach(code => transportCodes.add(code));
+                }
+
+                const transportByWorkArea = getTransportDistributions(resolved.code, resolved.geoObject, latestYear, Array.from(transportCodes));
                 const temporal = getTemporalAnalysis(resolved.code, resolved.geoObject);
-                renderResults({ total: officialTotal, details }, temporal, resolved, latestYear);
+                renderResults({ total: officialTotal, details }, temporal, resolved, latestYear, transportByWorkArea, hasCrossTransport);
             } catch (err) {
                 console.error(err);
                 showError(err.message || 'Erreur inconnue.');
