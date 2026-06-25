@@ -14,7 +14,7 @@
 </head>
 <body class="bg-slate-50 font-sans text-slate-800 min-h-screen p-4 md:p-8">
 
-    <div class="max-w-3xl mx-auto space-y-6">
+    <div class="max-w-5xl mx-auto space-y-6">
         <header class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 text-center">
             <div class="mx-auto bg-blue-100 w-16 h-16 flex items-center justify-center rounded-full mb-4">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 w-8 h-8"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -39,18 +39,18 @@
         </header>
 
         <form id="searchForm" class="space-y-3">
-            <div class="grid md:grid-cols-[1fr_180px_auto] gap-3">
+            <div class="grid md:grid-cols-[1fr_220px_auto] gap-3">
                 <div class="flex items-center bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
                     <div class="pl-4">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400 w-5 h-5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                     </div>
-                    <input type="text" id="inseeInput" placeholder="Ex : 33063, 243300316..." class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400 disabled:bg-slate-50" pattern="[A-Za-z0-9\-]+" maxlength="15" required disabled />
+                    <input type="text" id="inseeInput" placeholder="Ex : Bordeaux, Châtellerault, 33063, 243300316..." class="w-full py-4 px-4 outline-none text-lg text-slate-700 placeholder-slate-400 disabled:bg-slate-50" maxlength="80" required disabled />
                 </div>
 
                 <select id="geoObjectSelect" class="bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400" disabled>
                     <option value="AUTO">Type auto</option>
                     <option value="COM">Commune</option>
-                    <option value="EPCI">EPCI</option>
+                    <option value="EPCI">EPCI de la commune</option>
                     <option value="DEP">Département</option>
                     <option value="REG">Région</option>
                 </select>
@@ -61,9 +61,11 @@
             </div>
 
             <p class="text-xs text-slate-500 px-1">
-                Filtre utilisé : actifs occupés de 15 ans ou plus, tous modes de transport, population, fréquence annuelle.
+                Tu peux saisir un code INSEE directement ou le nom d'une commune. Pour un nom de commune, le site récupère automatiquement le code commune, EPCI, département ou région demandé.
             </p>
         </form>
+
+        <div id="resolvedInfo" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900"></div>
 
         <div id="errorContainer" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500 w-5 h-5 mt-0.5 flex-shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
@@ -77,14 +79,33 @@
     </div>
 
     <script>
+        const GEO_API_BASE = 'https://geo.api.gouv.fr';
+        const TEMPORAL_YEARS = ['2011', '2016', '2022'];
+
+        // Codes WORK_AREA utilisés dans DS_RP_NAVETTES_PRINC.
+        // Je garde aussi les anciens codes 1/2/3/4/5 au cas où une autre version du fichier les contient.
         const WORK_AREA_LABELS = {
-            "1": "Commune de résidence",
-            "2": "Autre commune du département de résidence",
-            "3": "Autre département de la région de résidence",
-            "4": "Autre région en France métropolitaine ou DOM",
-            "5": "Étranger",
-            "_T": "Total",
-            "Z": "Non applicable / Sans objet"
+            '10': 'Dans la commune de résidence actuelle',
+            '21': 'Autre commune du département',
+            '22': 'Autre département de la région',
+            '23': 'Hors de la région en métropole',
+            '24T30': 'Autre région hors métropole, y compris étranger',
+            '20_30': 'Dans une autre commune',
+            '1': 'Commune de résidence',
+            '2': 'Autre commune du département de résidence',
+            '3': 'Autre département de la région de résidence',
+            '4': 'Autre région en France métropolitaine ou DOM',
+            '5': 'Étranger',
+            '_T': 'Total',
+            'Z': 'Non applicable / Sans objet'
+        };
+
+        const GEO_OBJECT_LABELS = {
+            AUTO: 'Type auto',
+            COM: 'Commune',
+            EPCI: 'EPCI',
+            DEP: 'Département',
+            REG: 'Région'
         };
 
         let db = null;
@@ -95,15 +116,22 @@
         const input = document.getElementById('inseeInput');
         const geoObjectSelect = document.getElementById('geoObjectSelect');
         const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
         const errorContainer = document.getElementById('errorContainer');
         const errorMessage = document.getElementById('errorMessage');
         const resultsContainer = document.getElementById('resultsContainer');
+        const resolvedInfo = document.getElementById('resolvedInfo');
         const dbStatus = document.getElementById('dbStatus');
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
 
         function updateSubmitState() {
             submitBtn.disabled = !db || !input.value.trim();
+        }
+
+        function setBusy(isBusy, label = 'Analyser') {
+            submitBtn.disabled = isBusy || !db || !input.value.trim();
+            btnText.textContent = isBusy ? label : 'Analyser';
         }
 
         function showError(msg) {
@@ -113,6 +141,35 @@
             } else {
                 errorContainer.classList.add('hidden');
             }
+        }
+
+        function showResolvedInfo(resolved) {
+            if (!resolved) {
+                resolvedInfo.classList.add('hidden');
+                resolvedInfo.innerHTML = '';
+                return;
+            }
+
+            resolvedInfo.classList.remove('hidden');
+            resolvedInfo.innerHTML = `
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-semibold">Zone utilisée :</span>
+                    <span>${escapeHTML(resolved.label || resolved.code)}</span>
+                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-medium">${GEO_OBJECT_LABELS[resolved.geoObject] || resolved.geoObject}</span>
+                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">GEO=${escapeHTML(resolved.code)}</span>
+                    <span class="inline-flex rounded-full bg-white/70 border border-blue-200 px-2 py-0.5 text-xs font-mono">GEO_OBJECT=${resolved.geoObject}</span>
+                    ${resolved.via ? `<span class="text-xs text-blue-700">${escapeHTML(resolved.via)}</span>` : ''}
+                </div>
+            `;
+        }
+
+        function escapeHTML(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
         }
 
         function quoteIdent(identifier) {
@@ -130,16 +187,30 @@
             return quoteIdent(name);
         }
 
+        function normalizeCode(raw) {
+            return String(raw).trim().toUpperCase().replaceAll(' ', '');
+        }
+
+        function isDirectCode(raw) {
+            const c = normalizeCode(raw);
+            return /^\d{9}$/.test(c) || /^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c) || /^(2A|2B|\d{2}|97\d)$/.test(c) || /^\d{2}$/.test(c);
+        }
+
+        function isCommuneCode(raw) {
+            const c = normalizeCode(raw);
+            return /^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c);
+        }
+
         function detectGeoObject(code) {
-            const c = code.trim().toUpperCase();
+            const c = normalizeCode(code);
             if (/^\d{9}$/.test(c)) return 'EPCI';
             if (/^\d{5}$/.test(c) || /^2[AB]\d{3}$/.test(c)) return 'COM';
             if (/^(2A|2B|\d{2}|97\d)$/.test(c)) return 'DEP';
             return 'COM';
         }
 
-        function getGeoObject(code) {
-            return geoObjectSelect.value === 'AUTO' ? detectGeoObject(code) : geoObjectSelect.value;
+        function selectedGeoObject() {
+            return geoObjectSelect.value;
         }
 
         function getMeasureColumn() {
@@ -233,7 +304,7 @@
                   AND ${requiredColumn('WORK_AREA')} = :workArea
                 LIMIT 1
             `;
-            const params = { ...baseParams(code, geoObject), ':year': year, ':workArea': '_T' };
+            const params = { ...baseParams(code, geoObject), ':year': String(year), ':workArea': '_T' };
             const row = queryOne(sql, params);
             return row ? Number(row.total) : null;
         }
@@ -248,7 +319,7 @@
                   AND ${requiredColumn('WORK_AREA')} NOT IN ('_T', 'Z')
                 ORDER BY ${requiredColumn('OBS_VALUE')} DESC
             `;
-            const params = { ...baseParams(code, geoObject), ':year': year };
+            const params = { ...baseParams(code, geoObject), ':year': String(year) };
             return queryAll(sql, params).map(row => ({
                 code: String(row.work_area),
                 label: WORK_AREA_LABELS[String(row.work_area)] || `Code inconnu (${row.work_area})`,
@@ -256,54 +327,370 @@
             }));
         }
 
-        function renderResults(data, inseeCode, year, geoObject) {
-            let detailsHTML = '';
+        function getTemporalAnalysis(code, geoObject) {
+            const dataByYear = {};
+            const workAreaCodes = new Set();
 
-            if (data.details.length === 0) {
-                detailsHTML = `<p class="text-slate-500 text-center py-4">Le total existe, mais aucun détail WORK_AREA n'a été trouvé pour ces filtres.</p>`;
-            } else {
-                data.details.forEach(item => {
-                    detailsHTML += `
-                        <div class="space-y-2">
-                            <div class="flex justify-between items-end gap-4">
-                                <span class="font-medium text-slate-700">${item.label}</span>
-                                <div class="text-right whitespace-nowrap">
-                                    <span class="text-lg font-bold text-slate-900">${item.percentage.toFixed(1)}%</span>
-                                    <span class="text-sm text-slate-500 ml-2">(${Math.round(item.value).toLocaleString('fr-FR')})</span>
-                                </div>
-                            </div>
-                            <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                <div class="bg-blue-500 h-full rounded-full progress-bar" style="width: 0%;" data-target="${Math.min(item.percentage, 100)}%"></div>
-                            </div>
-                        </div>
-                    `;
+            TEMPORAL_YEARS.forEach(year => {
+                const total = getOfficialTotal(code, geoObject, year);
+                if (total === null || Number.isNaN(total) || total <= 0) return;
+
+                const details = getWorkAreaDetails(code, geoObject, year);
+                const detailsByCode = {};
+
+                details.forEach(item => {
+                    workAreaCodes.add(item.code);
+                    detailsByCode[item.code] = {
+                        ...item,
+                        percentage: (item.value / total) * 100
+                    };
                 });
+
+                dataByYear[year] = { total, detailsByCode };
+            });
+
+            const rows = Array.from(workAreaCodes).map(codeWA => {
+                const values = {};
+                TEMPORAL_YEARS.forEach(year => {
+                    values[year] = dataByYear[year]?.detailsByCode?.[codeWA] || null;
+                });
+
+                const first = values['2011'];
+                const last = values['2022'];
+                const pointEvolution = first && last ? last.percentage - first.percentage : null;
+                const relativeEvolution = first && last && first.percentage !== 0
+                    ? ((last.percentage - first.percentage) / first.percentage) * 100
+                    : null;
+
+                return {
+                    code: codeWA,
+                    label: WORK_AREA_LABELS[codeWA] || `Code inconnu (${codeWA})`,
+                    values,
+                    pointEvolution,
+                    relativeEvolution,
+                    sortValue: last?.percentage ?? values['2016']?.percentage ?? first?.percentage ?? 0
+                };
+            }).sort((a, b) => b.sortValue - a.sortValue);
+
+            return { dataByYear, rows };
+        }
+
+        async function fetchJson(url) {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Erreur API ${response.status} sur ${url}`);
+            }
+            return await response.json();
+        }
+
+        async function fetchFirst(url, notFoundMessage) {
+            const data = await fetchJson(url);
+            if (!Array.isArray(data) || data.length === 0) {
+                throw new Error(notFoundMessage);
+            }
+            return data[0];
+        }
+
+        async function getCommuneByName(name) {
+            const fields = 'nom,code,codeEpci,epci,codeDepartement,departement,codeRegion,region,population';
+            const url = `${GEO_API_BASE}/communes?nom=${encodeURIComponent(name)}&boost=population&fields=${fields}&format=json&limit=5`;
+            return await fetchFirst(url, `Aucune commune trouvée pour « ${name} ».`);
+        }
+
+        async function getCommuneByCode(code) {
+            const fields = 'nom,code,codeEpci,epci,codeDepartement,departement,codeRegion,region,population';
+            const url = `${GEO_API_BASE}/communes/${encodeURIComponent(code)}?fields=${fields}&format=json`;
+            return await fetchJson(url);
+        }
+
+        async function getEpciByName(name) {
+            const fields = 'nom,code,population,type';
+            const url = `${GEO_API_BASE}/epcis?nom=${encodeURIComponent(name)}&boost=population&fields=${fields}&format=json&limit=5`;
+            return await fetchFirst(url, `Aucun EPCI trouvé directement pour « ${name} ».`);
+        }
+
+        async function getEpciByCode(code) {
+            const fields = 'nom,code,population,type';
+            const url = `${GEO_API_BASE}/epcis/${encodeURIComponent(code)}?fields=${fields}&format=json`;
+            return await fetchJson(url);
+        }
+
+        async function getDepartementByName(name) {
+            const fields = 'nom,code,codeRegion,region';
+            const url = `${GEO_API_BASE}/departements?nom=${encodeURIComponent(name)}&fields=${fields}&format=json&limit=5`;
+            return await fetchFirst(url, `Aucun département trouvé directement pour « ${name} ».`);
+        }
+
+        async function getDepartementByCode(code) {
+            const fields = 'nom,code,codeRegion,region';
+            const url = `${GEO_API_BASE}/departements/${encodeURIComponent(code)}?fields=${fields}&format=json`;
+            return await fetchJson(url);
+        }
+
+        async function getRegionByName(name) {
+            const fields = 'nom,code';
+            const url = `${GEO_API_BASE}/regions?nom=${encodeURIComponent(name)}&fields=${fields}&format=json&limit=5`;
+            return await fetchFirst(url, `Aucune région trouvée directement pour « ${name} ».`);
+        }
+
+        async function getRegionByCode(code) {
+            const fields = 'nom,code';
+            const url = `${GEO_API_BASE}/regions/${encodeURIComponent(code)}?fields=${fields}&format=json`;
+            return await fetchJson(url);
+        }
+
+        async function resolveFromCommuneObject(commune, target) {
+            if (target === 'AUTO' || target === 'COM') {
+                return {
+                    code: commune.code,
+                    geoObject: 'COM',
+                    label: commune.nom,
+                    via: 'résolu par recherche communale'
+                };
             }
 
+            if (target === 'EPCI') {
+                const epciName = commune.epci?.nom || 'EPCI de la commune';
+                return {
+                    code: commune.codeEpci,
+                    geoObject: 'EPCI',
+                    label: epciName,
+                    via: `depuis la commune ${commune.nom}`
+                };
+            }
+
+            if (target === 'DEP') {
+                return {
+                    code: commune.codeDepartement,
+                    geoObject: 'DEP',
+                    label: commune.departement?.nom || `Département ${commune.codeDepartement}`,
+                    via: `depuis la commune ${commune.nom}`
+                };
+            }
+
+            if (target === 'REG') {
+                return {
+                    code: commune.codeRegion,
+                    geoObject: 'REG',
+                    label: commune.region?.nom || `Région ${commune.codeRegion}`,
+                    via: `depuis la commune ${commune.nom}`
+                };
+            }
+
+            throw new Error(`Type de territoire non reconnu : ${target}`);
+        }
+
+        async function resolveGeoInput(rawInput) {
+            const raw = rawInput.trim();
+            const target = selectedGeoObject();
+            const normalized = normalizeCode(raw);
+
+            // Cas 1 : l'utilisateur saisit déjà un code.
+            if (isDirectCode(raw)) {
+                // Si c'est un code commune et qu'on demande l'EPCI, le département ou la région,
+                // on interroge l'API pour remonter au bon niveau.
+                if (isCommuneCode(raw) && ['EPCI', 'DEP', 'REG'].includes(target)) {
+                    const commune = await getCommuneByCode(normalized);
+                    return await resolveFromCommuneObject(commune, target);
+                }
+
+                const geoObject = target === 'AUTO' ? detectGeoObject(normalized) : target;
+                let label = normalized;
+
+                try {
+                    if (geoObject === 'COM') label = (await getCommuneByCode(normalized)).nom || label;
+                    if (geoObject === 'EPCI') label = (await getEpciByCode(normalized)).nom || label;
+                    if (geoObject === 'DEP') label = (await getDepartementByCode(normalized)).nom || label;
+                    if (geoObject === 'REG') label = (await getRegionByCode(normalized)).nom || label;
+                } catch (err) {
+                    console.warn('Libellé non récupéré, utilisation du code seul.', err);
+                }
+
+                return {
+                    code: normalized,
+                    geoObject,
+                    label,
+                    via: 'code saisi directement'
+                };
+            }
+
+            // Cas 2 : l'utilisateur saisit un nom.
+            // Pour COM : recherche commune.
+            // Pour EPCI/DEP/REG : on tente d'abord une recherche directe du niveau demandé,
+            // puis un fallback par commune pour permettre "Bordeaux" -> Bordeaux Métropole / Gironde / Nouvelle-Aquitaine.
+            if (target === 'COM' || target === 'AUTO') {
+                const commune = await getCommuneByName(raw);
+                return await resolveFromCommuneObject(commune, 'COM');
+            }
+
+            if (target === 'EPCI') {
+                try {
+                    const epci = await getEpciByName(raw);
+                    return { code: epci.code, geoObject: 'EPCI', label: epci.nom, via: 'résolu par recherche EPCI directe' };
+                } catch (_) {
+                    const commune = await getCommuneByName(raw);
+                    return await resolveFromCommuneObject(commune, 'EPCI');
+                }
+            }
+
+            if (target === 'DEP') {
+                try {
+                    const dep = await getDepartementByName(raw);
+                    return { code: dep.code, geoObject: 'DEP', label: dep.nom, via: 'résolu par recherche département directe' };
+                } catch (_) {
+                    const commune = await getCommuneByName(raw);
+                    return await resolveFromCommuneObject(commune, 'DEP');
+                }
+            }
+
+            if (target === 'REG') {
+                try {
+                    const reg = await getRegionByName(raw);
+                    return { code: reg.code, geoObject: 'REG', label: reg.nom, via: 'résolu par recherche région directe' };
+                } catch (_) {
+                    const commune = await getCommuneByName(raw);
+                    return await resolveFromCommuneObject(commune, 'REG');
+                }
+            }
+
+            throw new Error(`Type de territoire non reconnu : ${target}`);
+        }
+
+        function formatNumber(value) {
+            if (value === null || value === undefined || Number.isNaN(value)) return '—';
+            return Math.round(value).toLocaleString('fr-FR');
+        }
+
+        function formatPct(value) {
+            if (value === null || value === undefined || Number.isNaN(value)) return '—';
+            return `${value.toFixed(1)} %`;
+        }
+
+        function formatSigned(value, suffix = '') {
+            if (value === null || value === undefined || Number.isNaN(value)) return '—';
+            const sign = value > 0 ? '+' : '';
+            return `${sign}${value.toFixed(1)}${suffix}`;
+        }
+
+        function renderMainTable(data) {
+            if (data.details.length === 0) {
+                return `<p class="text-slate-500 text-center py-4">Le total existe, mais aucun détail WORK_AREA n'a été trouvé pour ces filtres.</p>`;
+            }
+
+            return data.details.map(item => `
+                <div class="space-y-2">
+                    <div class="flex justify-between items-end gap-4">
+                        <span class="font-medium text-slate-700">${escapeHTML(item.label)}</span>
+                        <div class="text-right whitespace-nowrap">
+                            <span class="text-lg font-bold text-slate-900">${item.percentage.toFixed(1)}%</span>
+                            <span class="text-sm text-slate-500 ml-2">(${formatNumber(item.value)})</span>
+                        </div>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                        <div class="bg-blue-500 h-full rounded-full progress-bar" style="width: 0%;" data-target="${Math.min(item.percentage, 100)}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderTemporalTable(temporal) {
+            const availableYears = TEMPORAL_YEARS.filter(year => temporal.dataByYear[year]);
+
+            if (availableYears.length === 0 || temporal.rows.length === 0) {
+                return `
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+                        <div class="p-6 md:p-8">
+                            <h3 class="text-xl font-bold text-slate-900 mb-2">Analyse temporelle 2011 / 2016 / 2022</h3>
+                            <p class="text-slate-500">Aucune donnée temporelle trouvée pour les millésimes 2011, 2016 et 2022 avec les mêmes filtres.</p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const totalsHTML = TEMPORAL_YEARS.map(year => {
+                const yearData = temporal.dataByYear[year];
+                const labelClass = yearData ? 'bg-slate-100 text-slate-700' : 'bg-amber-100 text-amber-800';
+                return `<span class="inline-block text-xs font-medium ${labelClass} px-2 py-1 rounded-full">${year} : ${yearData ? formatNumber(yearData.total) : 'absent'}</span>`;
+            }).join('');
+
+            const rowsHTML = temporal.rows.map(row => {
+                const cells = TEMPORAL_YEARS.map(year => {
+                    const value = row.values[year];
+                    return `<td class="px-4 py-3 text-right whitespace-nowrap">${value ? formatPct(value.percentage) : '—'}</td>`;
+                }).join('');
+
+                const evoPoints = formatSigned(row.pointEvolution, ' pts');
+                const evoRel = formatSigned(row.relativeEvolution, ' %');
+                const evoClass = row.pointEvolution > 0 ? 'text-emerald-700' : row.pointEvolution < 0 ? 'text-red-700' : 'text-slate-600';
+
+                return `
+                    <tr class="border-t border-slate-100">
+                        <td class="px-4 py-3 font-medium text-slate-800">${escapeHTML(row.label)}</td>
+                        ${cells}
+                        <td class="px-4 py-3 text-right font-semibold whitespace-nowrap ${evoClass}">${evoPoints}</td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap ${evoClass}">${evoRel}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+                    <div class="p-6 md:p-8 border-b border-slate-100">
+                        <h3 class="text-xl font-bold text-slate-900 mb-2">Analyse temporelle des lieux de travail</h3>
+                        <p class="text-sm text-slate-500 mb-3">
+                            Comparaison des parts de chaque modalité WORK_AREA dans le total des actifs occupés résidents. L'évolution est calculée entre 2011 et 2022 quand les deux millésimes existent.
+                        </p>
+                        <div class="flex flex-wrap gap-2">${totalsHTML}</div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-semibold">WORK_AREA</th>
+                                    <th class="px-4 py-3 text-right font-semibold">Part 2011</th>
+                                    <th class="px-4 py-3 text-right font-semibold">Part 2016</th>
+                                    <th class="px-4 py-3 text-right font-semibold">Part 2022</th>
+                                    <th class="px-4 py-3 text-right font-semibold">Évol. 2011→2022</th>
+                                    <th class="px-4 py-3 text-right font-semibold">Var. relative</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rowsHTML}</tbody>
+                        </table>
+                    </div>
+                    <div class="bg-slate-50 p-4 border-t border-slate-100 text-xs text-slate-500">
+                        Exemple de lecture : +3,0 pts signifie que la part a augmenté de 3 points de pourcentage. La variation relative compare cette hausse à la part de départ en 2011.
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderResults(data, temporal, resolved, year) {
+            const detailsHTML = renderMainTable(data);
             const sumDetails = data.details.reduce((acc, item) => acc + item.value, 0);
             const gap = data.total - sumDetails;
             const gapHTML = Math.abs(gap) > 1
-                ? `<p class="mt-2 text-xs text-amber-700">Écart entre le total officiel et la somme des modalités affichées : ${Math.round(gap).toLocaleString('fr-FR')}. C'est possible si certaines modalités sont absentes, secrétisées ou non affichées.</p>`
+                ? `<p class="mt-2 text-xs text-amber-700">Écart entre le total officiel et la somme des modalités affichées : ${formatNumber(gap)}. C'est possible si certaines modalités sont absentes, secrétisées ou non affichées.</p>`
                 : '';
 
-            resultsContainer.innerHTML = `
+            const mainHTML = `
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
-                    <div class="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between gap-6">
+                    <div class="p-6 md:p-8 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                         <div>
                             <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-blue-500"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-                                Résultats pour ${inseeCode}
+                                Résultats pour ${escapeHTML(resolved.label || resolved.code)}
                             </h2>
                             <div class="mt-2 flex flex-wrap gap-2">
                                 <span class="inline-block text-xs font-medium bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Millésime ${year}</span>
-                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">GEO_OBJECT = ${geoObject}</span>
+                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">GEO_OBJECT = ${resolved.geoObject}</span>
+                                <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">GEO = ${escapeHTML(resolved.code)}</span>
                                 <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">TRANS = _T</span>
                                 <span class="inline-block text-xs font-medium bg-slate-100 text-slate-700 px-2 py-1 rounded-full">AGE = Y_GE15</span>
                             </div>
                         </div>
                         <div class="text-right shrink-0">
                             <p class="text-sm text-slate-500 font-medium uppercase tracking-wider">Total officiel</p>
-                            <p class="text-2xl font-bold text-blue-600">${Math.round(data.total).toLocaleString('fr-FR')}</p>
+                            <p class="text-2xl font-bold text-blue-600">${formatNumber(data.total)}</p>
                         </div>
                     </div>
                     <div class="p-6 md:p-8 space-y-6">
@@ -318,6 +705,8 @@
                     </div>
                 </div>
             `;
+
+            resultsContainer.innerHTML = mainHTML + renderTemporalTable(temporal);
 
             setTimeout(() => {
                 resultsContainer.querySelectorAll('.progress-bar').forEach(bar => {
@@ -346,13 +735,14 @@
 
         async function loadDatabaseFromFile(file) {
             dbStatus.classList.remove('hidden');
-            dbStatus.className = "mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800";
+            dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800';
             dbStatus.innerHTML = `
                 <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 Chargement de la base en cours...
             `;
             dropZone.style.display = 'none';
             showError('');
+            showResolvedInfo(null);
             resultsContainer.innerHTML = '';
 
             try {
@@ -366,7 +756,7 @@
                     throw new Error("La base ne contient pas de table nommée 'navettes'.");
                 }
 
-                const pragma = db.exec("PRAGMA table_info(navettes)");
+                const pragma = db.exec('PRAGMA table_info(navettes)');
                 tableColumns = pragma.length ? pragma[0].values.map(row => row[1]) : [];
                 measureColumn = getMeasureColumn();
 
@@ -376,8 +766,8 @@
                     throw new Error(`Colonnes manquantes dans la table navettes : ${missing.join(', ')}`);
                 }
 
-                dbStatus.className = "mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800";
-                dbStatus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Base chargée : ${file.name}`;
+                dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800';
+                dbStatus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Base chargée : ${escapeHTML(file.name)}`;
 
                 input.disabled = false;
                 geoObjectSelect.disabled = false;
@@ -391,54 +781,67 @@
                 input.disabled = true;
                 geoObjectSelect.disabled = true;
                 updateSubmitState();
-                dbStatus.className = "mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800";
-                dbStatus.innerHTML = "Échec du chargement du fichier.";
+                dbStatus.className = 'mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
+                dbStatus.innerHTML = 'Échec du chargement du fichier.';
                 showError(err.message || "Le fichier fourni n'a pas pu être lu comme une base SQLite valide.");
                 dropZone.style.display = 'block';
             }
         }
 
         input.addEventListener('input', updateSubmitState);
+        geoObjectSelect.addEventListener('change', updateSubmitState);
 
-        form.addEventListener('submit', (e) => {
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!db) return;
 
-            const inseeCode = input.value.trim().toUpperCase();
-            if (!inseeCode) return;
+            const rawInput = input.value.trim();
+            if (!rawInput) return;
 
             showError('');
+            showResolvedInfo(null);
             resultsContainer.innerHTML = '';
+            setBusy(true, 'Recherche...');
 
             try {
-                const geoObject = getGeoObject(inseeCode);
-                const latestYear = getLatestYear(inseeCode, geoObject);
+                const resolved = await resolveGeoInput(rawInput);
+                if (!resolved?.code || !resolved?.geoObject) {
+                    throw new Error('Impossible de résoudre ce territoire.');
+                }
 
+                showResolvedInfo(resolved);
+                setBusy(true, 'Calcul...');
+
+                const latestYear = getLatestYear(resolved.code, resolved.geoObject);
                 if (!latestYear) {
-                    const availableGeoObjects = getDistinctValues('GEO_OBJECT', inseeCode).join(', ') || 'aucun';
-                    const availableTrans = getDistinctValues('TRANS', inseeCode).join(', ') || 'aucun';
+                    const availableGeoObjects = getDistinctValues('GEO_OBJECT', resolved.code).join(', ') || 'aucun';
+                    const availableTrans = getDistinctValues('TRANS', resolved.code).join(', ') || 'aucun';
                     throw new Error(
-                        `Aucune ligne totalisée trouvée pour ${inseeCode} avec GEO_OBJECT=${geoObject}, AGE=Y_GE15, EMPSTA_ENQ=1, TRANS=_T et ${measureColumn}=POP. ` +
+                        `Aucune ligne totalisée trouvée pour ${resolved.code} avec GEO_OBJECT=${resolved.geoObject}, AGE=Y_GE15, EMPSTA_ENQ=1, TRANS=_T et ${measureColumn}=POP. ` +
                         `Valeurs disponibles pour ce GEO — GEO_OBJECT : ${availableGeoObjects} ; TRANS : ${availableTrans}.`
                     );
                 }
 
-                const officialTotal = getOfficialTotal(inseeCode, geoObject, latestYear);
+                const officialTotal = getOfficialTotal(resolved.code, resolved.geoObject, latestYear);
                 if (officialTotal === null || Number.isNaN(officialTotal)) {
-                    throw new Error(`La ligne officielle WORK_AREA=_T est introuvable pour ${inseeCode} en ${latestYear}.`);
+                    throw new Error(`La ligne officielle WORK_AREA=_T est introuvable pour ${resolved.code} en ${latestYear}.`);
                 }
 
-                const details = getWorkAreaDetails(inseeCode, geoObject, latestYear)
+                const details = getWorkAreaDetails(resolved.code, resolved.geoObject, latestYear)
                     .map(item => ({
                         ...item,
                         percentage: officialTotal > 0 ? (item.value / officialTotal) * 100 : 0
                     }))
                     .sort((a, b) => b.value - a.value);
 
-                renderResults({ total: officialTotal, details }, inseeCode, latestYear, geoObject);
+                const temporal = getTemporalAnalysis(resolved.code, resolved.geoObject);
+                renderResults({ total: officialTotal, details }, temporal, resolved, latestYear);
             } catch (err) {
                 console.error(err);
-                showError(err.message);
+                showError(err.message || 'Erreur inconnue.');
+            } finally {
+                setBusy(false);
+                updateSubmitState();
             }
         });
     </script>
