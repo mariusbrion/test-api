@@ -6,6 +6,8 @@
     <title>Mobilités professionnelles INSEE - Fichier détail MOBPRO</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         .fade-in { animation: fadeIn 0.45s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -15,6 +17,10 @@
         .donut-tooltip { position: fixed; z-index: 50; display: none; max-width: min(380px, calc(100vw - 32px)); pointer-events: none; }
         .donut-chart { width: 112px; height: 112px; border-radius: 9999px; display: grid; place-items: center; flex: 0 0 auto; }
         .donut-hole { width: 62px; height: 62px; border-radius: 9999px; background: white; display: flex; align-items: center; justify-content: center; text-align: center; }
+        #epciMap { height: 520px; min-height: 420px; width: 100%; background: #f8fafc; }
+        .leaflet-container { font-family: inherit; border-radius: 0 0 1rem 1rem; }
+        .map-legend { background: rgba(255,255,255,0.94); padding: 10px 12px; border-radius: 12px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); font-size: 12px; color: #334155; }
+        .map-legend-gradient { height: 10px; width: 160px; border-radius: 9999px; background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); margin: 6px 0; }
     </style>
 </head>
 <body class="bg-slate-50 font-sans text-slate-800 min-h-screen p-4 md:p-8">
@@ -132,6 +138,8 @@ let db = null;
 let availableGeoObjects = new Set();
 let availableYears = [];
 let currentModalData = {};
+let currentMap = null;
+let geoJsonCache = new Map();
 
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
@@ -221,13 +229,58 @@ async function fetchJSON(url) {
     return await response.json();
 }
 
+async function getCommuneByCode(code) {
+    const commune = await fetchJSON(`${GEO_API_BASE}/communes/${encodeURIComponent(code)}?fields=nom,code,codeEpci,codeDepartement,codeRegion`);
+    return commune;
+}
+
+function enrichResolved(base, commune = null) {
+    const resolved = { ...base };
+    if (commune) {
+        resolved.communeCode = commune.code || null;
+        resolved.communeName = commune.nom || null;
+        resolved.epciCode = commune.codeEpci || null;
+        resolved.depCode = commune.codeDepartement || null;
+        resolved.regCode = commune.codeRegion || null;
+    }
+    return resolved;
+}
+
 async function resolveTerritory(raw, selectedGeoObject) {
     const input = normalizeCode(raw);
     const wanted = selectedGeoObject || 'AUTO';
 
     if (isDirectCode(input)) {
-        const geoObject = wanted === 'AUTO' ? inferGeoObjectFromCode(input) : wanted;
-        return { code: input, geoObject, label: input, via: 'code saisi directement' };
+        const inferred = inferGeoObjectFromCode(input);
+
+        // Cas utile : l'utilisateur tape un code commune puis demande l'EPCI, le département ou la région.
+        if (inferred === 'COM') {
+            let commune = null;
+            try { commune = await getCommuneByCode(input); } catch (_) {}
+            const finalObject = wanted === 'AUTO' ? 'COM' : wanted;
+
+            if (commune && finalObject === 'COM') {
+                return enrichResolved({ code: commune.code, geoObject: 'COM', label: `${commune.nom} (${commune.code})`, via: 'code commune enrichi par l’API géographique' }, commune);
+            }
+            if (commune && finalObject === 'EPCI') {
+                if (!commune.codeEpci) throw new Error(`L'API n'a pas renvoyé d'EPCI pour ${commune.nom}.`);
+                return enrichResolved({ code: commune.codeEpci, geoObject: 'EPCI', label: `EPCI de ${commune.nom} (${commune.codeEpci})`, via: 'résolu depuis le code commune' }, commune);
+            }
+            if (commune && finalObject === 'DEP') {
+                return enrichResolved({ code: commune.codeDepartement, geoObject: 'DEP', label: `Département de ${commune.nom} (${commune.codeDepartement})`, via: 'résolu depuis le code commune' }, commune);
+            }
+            if (commune && finalObject === 'REG') {
+                return enrichResolved({ code: commune.codeRegion, geoObject: 'REG', label: `Région de ${commune.nom} (${commune.codeRegion})`, via: 'résolu depuis le code commune' }, commune);
+            }
+            return { code: input, geoObject: finalObject, label: input, via: 'code saisi directement' };
+        }
+
+        const finalObject = wanted === 'AUTO' ? inferred : wanted;
+        const resolved = { code: input, geoObject: finalObject, label: input, via: 'code saisi directement' };
+        if (finalObject === 'EPCI') resolved.epciCode = input;
+        if (finalObject === 'DEP') resolved.depCode = input;
+        if (finalObject === 'REG') resolved.regCode = input;
+        return resolved;
     }
 
     const communeUrl = `${GEO_API_BASE}/communes?nom=${encodeURIComponent(raw)}&fields=nom,code,codeEpci,codeDepartement,codeRegion&boost=population&limit=5`;
@@ -239,17 +292,17 @@ async function resolveTerritory(raw, selectedGeoObject) {
     const geoObject = wanted === 'AUTO' ? 'COM' : wanted;
 
     if (geoObject === 'COM') {
-        return { code: commune.code, geoObject: 'COM', label: `${commune.nom} (${commune.code})`, via: 'résolu depuis le nom de commune' };
+        return enrichResolved({ code: commune.code, geoObject: 'COM', label: `${commune.nom} (${commune.code})`, via: 'résolu depuis le nom de commune' }, commune);
     }
     if (geoObject === 'EPCI') {
         if (!commune.codeEpci) throw new Error(`L'API n'a pas renvoyé d'EPCI pour ${commune.nom}.`);
-        return { code: commune.codeEpci, geoObject: 'EPCI', label: `EPCI de ${commune.nom} (${commune.codeEpci})`, via: 'résolu depuis la commune' };
+        return enrichResolved({ code: commune.codeEpci, geoObject: 'EPCI', label: `EPCI de ${commune.nom} (${commune.codeEpci})`, via: 'résolu depuis la commune' }, commune);
     }
     if (geoObject === 'DEP') {
-        return { code: commune.codeDepartement, geoObject: 'DEP', label: `Département de ${commune.nom} (${commune.codeDepartement})`, via: 'résolu depuis la commune' };
+        return enrichResolved({ code: commune.codeDepartement, geoObject: 'DEP', label: `Département de ${commune.nom} (${commune.codeDepartement})`, via: 'résolu depuis la commune' }, commune);
     }
     if (geoObject === 'REG') {
-        return { code: commune.codeRegion, geoObject: 'REG', label: `Région de ${commune.nom} (${commune.codeRegion})`, via: 'résolu depuis la commune' };
+        return enrichResolved({ code: commune.codeRegion, geoObject: 'REG', label: `Région de ${commune.nom} (${commune.codeRegion})`, via: 'résolu depuis la commune' }, commune);
     }
     throw new Error(`Type de territoire non reconnu : ${geoObject}`);
 }
@@ -275,6 +328,7 @@ function showResolvedInfo(resolved) {
 
 async function loadDatabaseFromFile(file) {
     showError('');
+    if (currentMap) { currentMap.remove(); currentMap = null; }
     resultsContainer.innerHTML = '';
     resolvedInfo.classList.add('hidden');
     dbStatus.classList.remove('hidden');
@@ -361,6 +415,29 @@ function getTransportForWorkArea(resolved, year, workArea) {
         .map(r => ({ code: String(r.trans), label: TRANS_LABELS[String(r.trans)] || `Mode ${r.trans}`, value: Number(r.value) || 0 }))
         .filter(r => r.value > 0)
         .sort((a, b) => TRANS_ORDER.indexOf(a.code) - TRANS_ORDER.indexOf(b.code));
+}
+
+function getTransportForGeo(geoObject, geo, year) {
+    if (!geoObject || !geo) return [];
+    const rows = queryRows(
+        `SELECT trans, SUM(value) AS value
+         FROM mobpro_agg
+         WHERE geo_object = :geoObject AND geo = :geo AND year = :year
+         GROUP BY trans`,
+        { ':geoObject': geoObject, ':geo': geo, ':year': year }
+    );
+    return rows
+        .map(r => ({ code: String(r.trans), label: TRANS_LABELS[String(r.trans)] || `Mode ${r.trans}`, value: Number(r.value) || 0 }))
+        .filter(r => r.value > 0)
+        .sort((a, b) => TRANS_ORDER.indexOf(a.code) - TRANS_ORDER.indexOf(b.code));
+}
+
+function getContextualTransportDonuts(resolved, year) {
+    const output = {};
+    output.GLOBAL = getTransportForGeo(resolved.geoObject, resolved.code, year);
+    if (resolved.depCode && availableGeoObjects.has('DEP')) output.DEP = getTransportForGeo('DEP', resolved.depCode, year);
+    if (resolved.regCode && availableGeoObjects.has('REG')) output.REG = getTransportForGeo('REG', resolved.regCode, year);
+    return output;
 }
 
 function getTransportByWorkAreas(resolved, year) {
@@ -602,31 +679,231 @@ function renderTemporalTable(resolved, territoryYears) {
     `;
 }
 
-function renderTransportSummary() {
-    const rows = currentModalData['20_30'] || [];
+function renderTransportSummary(resolved) {
+    const cards = [
+        { key: 'GLOBAL', title: `Tous les actifs — ${resolved.label}` },
+        { key: '10', title: WORK_LABELS['10'] },
+        { key: '20_30', title: WORK_LABELS['20_30'] },
+        { key: 'DEP', title: resolved.depCode ? `Département (${resolved.depCode}) — tous les actifs` : null },
+        { key: 'REG', title: resolved.regCode ? `Région (${resolved.regCode}) — tous les actifs` : null }
+    ].filter(item => item.title && (currentModalData[item.key] || []).length);
+
     return `
         <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
             <div class="p-6 md:p-8 border-b border-slate-100">
-                <h2 class="text-xl font-bold text-slate-900">Parts modales croisées</h2>
-                <p class="text-sm text-slate-500 mt-1">Cette fois, les parts modales sont bien croisées avec le lieu de travail, car elles viennent du fichier détail MOBPRO agrégé par IPONDI.</p>
+                <h2 class="text-xl font-bold text-slate-900">Parts modales</h2>
+                <p class="text-sm text-slate-500 mt-1">Lecture croisée par lieu de travail, plus comparaison globale avec le territoire analysé, son département et sa région quand l’information est disponible.</p>
             </div>
-            <div class="p-6 md:p-8 grid md:grid-cols-2 gap-6">
-                <div class="bg-slate-50 rounded-xl border border-slate-100 p-4">${buildDonutHTML(WORK_LABELS['10'], currentModalData['10'] || [])}</div>
-                <div class="bg-slate-50 rounded-xl border border-slate-100 p-4">${buildDonutHTML(WORK_LABELS['20_30'], rows)}</div>
+            <div class="p-6 md:p-8 grid lg:grid-cols-2 gap-6">
+                ${cards.map(card => `<div class="bg-slate-50 rounded-xl border border-slate-100 p-4">${buildDonutHTML(card.title, currentModalData[card.key] || [])}</div>`).join('')}
             </div>
         </section>
     `;
 }
 
+function getSafeCodeList(codes) {
+    return codes
+        .map(code => normalizeCode(code))
+        .filter(code => /^[0-9A-Z]+$/.test(code));
+}
+
+function getCommuneMapStats(communeCodes, year) {
+    const safeCodes = getSafeCodeList(communeCodes);
+    const stats = {};
+    for (const code of safeCodes) {
+        stats[code] = { total: 0, own: 0, car: 0 };
+    }
+    if (!safeCodes.length) return stats;
+
+    const quotedCodes = safeCodes.map(code => `'${code.replaceAll("'", "''")}'`).join(',');
+    const rows = queryRows(
+        `SELECT geo, work_area, trans, SUM(value) AS value
+         FROM mobpro_agg
+         WHERE geo_object = 'COM'
+           AND year = :year
+           AND geo IN (${quotedCodes})
+         GROUP BY geo, work_area, trans`,
+        { ':year': year }
+    );
+
+    for (const row of rows) {
+        const code = String(row.geo);
+        const value = Number(row.value) || 0;
+        if (!stats[code]) stats[code] = { total: 0, own: 0, car: 0 };
+        stats[code].total += value;
+        if (String(row.work_area) === '10') stats[code].own += value;
+        if (String(row.trans) === '5') stats[code].car += value;
+    }
+
+    for (const code of Object.keys(stats)) {
+        const item = stats[code];
+        item.ownShare = item.total > 0 ? (item.own / item.total) * 100 : null;
+        item.carShare = item.total > 0 ? (item.car / item.total) * 100 : null;
+    }
+    return stats;
+}
+
+function colorForOwnShare(value) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return '#e2e8f0';
+    if (value >= 55) return '#1e3a8a';
+    if (value >= 45) return '#1d4ed8';
+    if (value >= 35) return '#2563eb';
+    if (value >= 25) return '#60a5fa';
+    if (value >= 15) return '#bfdbfe';
+    return '#eff6ff';
+}
+
+async function fetchEpciCommunesGeoJSON(epciCode) {
+    if (!epciCode) return null;
+    if (geoJsonCache.has(epciCode)) return geoJsonCache.get(epciCode);
+    const url = `${GEO_API_BASE}/communes?codeEpci=${encodeURIComponent(epciCode)}&fields=nom,code,codeEpci,codeDepartement,codeRegion&format=geojson&geometry=contour`;
+    const geojson = await fetchJSON(url);
+    geoJsonCache.set(epciCode, geojson);
+    return geojson;
+}
+
+async function enrichContextFromEpci(resolved) {
+    const epciCode = resolved.epciCode || (resolved.geoObject === 'EPCI' ? resolved.code : null);
+    if (!epciCode || (resolved.depCode && resolved.regCode)) return resolved;
+    try {
+        const communes = await fetchJSON(`${GEO_API_BASE}/communes?codeEpci=${encodeURIComponent(epciCode)}&fields=code,nom,codeDepartement,codeRegion&limit=300`);
+        const deps = Array.from(new Set((communes || []).map(c => c.codeDepartement).filter(Boolean)));
+        const regs = Array.from(new Set((communes || []).map(c => c.codeRegion).filter(Boolean)));
+        if (!resolved.depCode && deps.length === 1) resolved.depCode = deps[0];
+        if (!resolved.regCode && regs.length === 1) resolved.regCode = regs[0];
+    } catch (err) {
+        console.warn('Contexte département/région non enrichi depuis l’EPCI :', err);
+    }
+    return resolved;
+}
+
+function renderMapSection(resolved) {
+    const epciCode = resolved.epciCode || (resolved.geoObject === 'EPCI' ? resolved.code : null);
+    if (!epciCode) {
+        return `
+            <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+                <div class="p-6 md:p-8">
+                    <h2 class="text-xl font-bold text-slate-900">Carte des communes de l’EPCI</h2>
+                    <p class="text-sm text-slate-500 mt-1">Carte indisponible : le code EPCI n’a pas pu être déterminé depuis la recherche.</p>
+                </div>
+            </section>
+        `;
+    }
+    return `
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden fade-in">
+            <div class="p-6 md:p-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900">Carte des communes de l’EPCI</h2>
+                    <p class="text-sm text-slate-500 mt-1">Coloration selon la part d’actifs travaillant dans leur commune de résidence. Le popup ajoute la part modale voiture moyenne.</p>
+                </div>
+                <div class="text-xs text-slate-500 lg:text-right">
+                    <span class="font-mono">EPCI ${escapeHTML(epciCode)}</span><br>
+                    <span id="mapStatus">Chargement des contours communaux...</span>
+                </div>
+            </div>
+            <div id="epciMap"></div>
+        </section>
+    `;
+}
+
+async function renderEpciMap(resolved, year) {
+    const epciCode = resolved.epciCode || (resolved.geoObject === 'EPCI' ? resolved.code : null);
+    const mapEl = document.getElementById('epciMap');
+    const statusEl = document.getElementById('mapStatus');
+    if (!mapEl || !epciCode || typeof L === 'undefined') return;
+
+    try {
+        const geojson = await fetchEpciCommunesGeoJSON(epciCode);
+        const features = geojson?.features || [];
+        if (!features.length) throw new Error('aucun contour communal renvoyé par l’API');
+
+        const communeCodes = features.map(feature => feature.properties?.code).filter(Boolean);
+        const stats = getCommuneMapStats(communeCodes, year);
+        const analyzedCommune = resolved.communeCode || (resolved.geoObject === 'COM' ? resolved.code : null);
+
+        if (currentMap) {
+            currentMap.remove();
+            currentMap = null;
+        }
+
+        currentMap = L.map('epciMap', { scrollWheelZoom: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(currentMap);
+
+        const layer = L.geoJSON(geojson, {
+            style: feature => {
+                const code = feature.properties?.code;
+                const ownShare = stats[code]?.ownShare;
+                const isAnalyzed = analyzedCommune && code === analyzedCommune;
+                return {
+                    color: isAnalyzed ? '#0f172a' : '#ffffff',
+                    weight: isAnalyzed ? 3 : 1,
+                    fillColor: colorForOwnShare(ownShare),
+                    fillOpacity: 0.78,
+                    opacity: 1
+                };
+            },
+            onEachFeature: (feature, layer) => {
+                const props = feature.properties || {};
+                const code = props.code;
+                const item = stats[code] || {};
+                const isAnalyzed = analyzedCommune && code === analyzedCommune;
+                layer.bindPopup(`
+                    <div class="text-sm">
+                        <div class="font-bold text-slate-900">${escapeHTML(props.nom || code)} ${isAnalyzed ? '★' : ''}</div>
+                        <div class="text-slate-500 font-mono mb-2">${escapeHTML(code)}</div>
+                        <div><b>Actifs occupés :</b> ${item.total ? formatNumber(item.total) : '—'}</div>
+                        <div><b>Travaille dans sa commune :</b> ${item.ownShare === null || item.ownShare === undefined ? '—' : formatPct(item.ownShare)}</div>
+                        <div><b>Voiture, tous lieux :</b> ${item.carShare === null || item.carShare === undefined ? '—' : formatPct(item.carShare)}</div>
+                    </div>
+                `);
+                layer.on({
+                    mouseover: e => e.target.setStyle({ weight: 3, color: '#0f172a', fillOpacity: 0.9 }),
+                    mouseout: e => layer.resetStyle(e.target)
+                });
+            }
+        }).addTo(currentMap);
+
+        currentMap.fitBounds(layer.getBounds(), { padding: [18, 18] });
+
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function () {
+            const div = L.DomUtil.create('div', 'map-legend');
+            div.innerHTML = `
+                <div class="font-semibold">Travaille dans sa commune</div>
+                <div class="map-legend-gradient"></div>
+                <div class="flex justify-between gap-3"><span>faible</span><span>élevé</span></div>
+                <div class="mt-2 text-[11px]">Bord noir : commune recherchée</div>
+            `;
+            return div;
+        };
+        legend.addTo(currentMap);
+
+        if (statusEl) {
+            const values = Object.values(stats).map(s => s.ownShare).filter(v => Number.isFinite(v));
+            const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+            statusEl.textContent = `${features.length} communes affichées · moyenne simple ${avg === null ? '—' : formatPct(avg)}`;
+        }
+    } catch (err) {
+        console.error(err);
+        if (statusEl) statusEl.textContent = `Carte indisponible : ${err.message}`;
+        mapEl.innerHTML = `<div class="p-6 text-sm text-amber-700 bg-amber-50 border-t border-amber-100">Impossible de charger la carte : ${escapeHTML(err.message)}</div>`;
+    }
+}
+
 async function analyze(rawInput, selectedGeoObject) {
     if (!db) return;
     showError('');
+    if (currentMap) { currentMap.remove(); currentMap = null; }
     resultsContainer.innerHTML = '';
     showResolvedInfo(null);
     setBusy(true, 'Analyse...');
 
     try {
         const resolved = await resolveTerritory(rawInput, selectedGeoObject);
+        await enrichContextFromEpci(resolved);
         showResolvedInfo(resolved);
 
         if (!availableGeoObjects.has(resolved.geoObject)) {
@@ -644,7 +921,10 @@ async function analyze(rawInput, selectedGeoObject) {
             throw new Error(`Aucun actif occupé trouvé pour ${resolved.code} en ${latestYear}.`);
         }
 
-        currentModalData = getTransportByWorkAreas(resolved, latestYear);
+        currentModalData = {
+            ...getContextualTransportDonuts(resolved, latestYear),
+            ...getTransportByWorkAreas(resolved, latestYear)
+        };
 
         resultsContainer.innerHTML = `
             <div class="space-y-6">
@@ -654,10 +934,13 @@ async function analyze(rawInput, selectedGeoObject) {
                     <span><b>Source :</b> MOBPRO agrégé, poids IPONDI</span>
                 </div>
                 ${renderMainBars(byWork, total)}
-                ${renderTransportSummary()}
+                ${renderTransportSummary(resolved)}
                 ${renderTemporalTable(resolved, territoryYears)}
+                ${renderMapSection(resolved)}
             </div>
         `;
+
+        await renderEpciMap(resolved, latestYear);
     } catch (err) {
         console.error(err);
         showError(err.message);
